@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
+
+web/.next/
+web/node_modules/
+
+output*/
+real_test_data/
+real_test_data_upscaled/
+tmp_obama.jpg
