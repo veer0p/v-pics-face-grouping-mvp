@@ -1,24 +1,48 @@
-# Face Grouping MVP (Next.js + Supabase + Python Worker)
+# Face Grouping MVP
 
-This repo now contains:
+Upload photos, process them in a background worker, and view auto-grouped people clusters (Google Photos style).
 
-- `web/`: Next.js app (upload UI + job status/results pages + API routes)
-- `worker/`: Python background worker for face detection, embeddings, and clustering
-- `supabase/migrations/`: SQL migrations for schema, RPC functions, and storage policies
-- `face_cluster.py`: standalone CLI prototype (kept for direct local experiments)
+Stack:
+- Next.js app for upload + result UI
+- Supabase for Postgres, RPC orchestration, and Storage buckets
+- Python worker for face detection, embeddings, and clustering (`insightface + DBSCAN`)
 
-## Architecture
+## Project Structure
 
-1. User uploads images from the web UI.
-2. Next.js API creates a job and signed upload URLs in Supabase.
-3. Browser uploads files directly into private `photo-originals` bucket.
-4. API marks uploads complete and queues the job.
-5. Python worker claims queued jobs, runs face grouping, uploads crops into `face-crops`, and writes clusters/faces into Postgres.
-6. Web job page polls status and renders grouped people.
+- `web/`: Next.js frontend + server routes
+- `worker/`: Background processing worker
+- `supabase/migrations/`: SQL schema + RPC + storage policies
+- `face_cluster.py`: Standalone CLI prototype (kept for local experiments)
+- `build.ps1`: One-command build/test script
 
-## 1) Environment
+## Prerequisites
 
-Copy `.env.example` to `.env.local` for `web` and to `.env` for worker usage:
+- Node.js `>=20`
+- npm `>=10`
+- Python `>=3.10`
+- Supabase project (URL, anon key, service role key)
+
+Notes:
+- On first real face-processing run, `insightface` downloads model files.
+- If port `3000` is occupied locally, run Next.js on another port (example: `3001`).
+
+## Environment Setup
+
+1. Copy root env template:
+
+```bash
+copy .env.example .env
+```
+
+2. Create web env file (`web/.env.local`) with:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+3. Required root `.env` values:
 
 ```bash
 SUPABASE_URL=...
@@ -31,69 +55,121 @@ WORKER_LEASE_SECONDS=300
 WORKER_HEARTBEAT_SECONDS=30
 ```
 
-## 2) Apply Supabase Migrations
+## Supabase Setup (Required)
 
-Run these SQL files in order in Supabase SQL editor (or Supabase CLI if configured):
+Apply migrations in this exact order:
 
 1. `supabase/migrations/20260217120000_init_face_grouping_schema.sql`
 2. `supabase/migrations/20260217121000_job_rpc_functions.sql`
 3. `supabase/migrations/20260217122000_storage_buckets_and_policies.sql`
 
-## 3) Run Web App
+If you skip this, worker fails with errors like:
+- `Could not find the function public.rpc_claim_next_job...`
+
+## Install Dependencies
+
+### Web
 
 ```bash
 cd web
 npm install
-npm run dev
+cd ..
 ```
 
-Open `http://localhost:3000`.
+### Python (worker + prototype)
 
-## 4) Build Everything
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r worker/requirements.txt
+pip install -r requirements.txt
+```
+
+Python compatibility notes:
+- `insightface` uses version markers:
+  - Python `<3.13`: `insightface 0.7.x`
+  - Python `>=3.13`: `insightface 0.2.1`
+
+## Run the MVP
+
+### Start web app
+
+```bash
+npm --prefix web run dev
+```
+
+Open:
+- `http://localhost:3000`
+- or `http://localhost:3001` if started with `-- --port 3001`
+
+### Start worker
+
+```bash
+python worker/main.py
+```
+
+Optional single-cycle run:
+
+```bash
+python worker/main.py --once
+```
+
+## Usage Flow
+
+1. Open web UI.
+2. Select up to 30 images.
+3. Click `Start Grouping`.
+4. UI uploads files to private Supabase bucket and queues job.
+5. Worker claims job, processes faces, stores cluster results.
+6. Job page auto-polls and displays people-wise grouped faces.
+
+## API Endpoints
+
+- `POST /api/upload/init`
+- `POST /api/upload/complete`
+- `GET /api/jobs/:jobId`
+
+## Build and Verification
+
+Run full checks:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Optional flags:
+Optional:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File .\build.ps1 -SkipWebInstall
 powershell -ExecutionPolicy Bypass -File .\build.ps1 -SkipPyTests
 ```
 
-## 5) Run Worker
+What it runs:
+- Python compile check
+- Python tests (`pytest`)
+- Web lint
+- Web production build
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r worker/requirements.txt
-python worker/main.py
-```
+## Troubleshooting
 
-`requirements.txt` and `worker/requirements.txt` include Python-version markers:
-- Python `<3.13`: `insightface 0.7.x`
-- Python `>=3.13`: `insightface 0.2.1` fallback
+- Worker exits with RPC missing:
+  - Apply all SQL migrations to Supabase.
+- Web starts but uploads fail:
+  - Verify `SUPABASE_SERVICE_ROLE_KEY` is set in `web/.env.local`.
+- First processing run is slow:
+  - Model download/initialization is happening.
+- Port conflict on `3000`:
+  - `npm --prefix web run dev -- --port 3001`.
 
-For one-pass debugging:
+## Security
 
-```bash
-python worker/main.py --once
-```
+- Do not expose `SUPABASE_SERVICE_ROLE_KEY` in client-side code.
+- Keep buckets private (already configured by migration).
+- Rotate keys if they were ever shared publicly.
 
-## API Endpoints (implemented)
+## Legacy CLI Prototype
 
-- `POST /api/upload/init`
-- `POST /api/upload/complete`
-- `GET /api/jobs/:jobId`
-
-## Important Security Note
-
-You shared keys in chat. Rotate your Supabase `service_role` key before any production use.
-
-## Existing CLI Prototype
-
-The original script still works:
+Standalone local clustering still works:
 
 ```bash
 python face_cluster.py --input photos --output output_album
