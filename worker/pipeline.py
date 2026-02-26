@@ -33,7 +33,7 @@ class ImageInput:
 
 @dataclass
 class PipelineConfig:
-    eps: float = 0.35
+    eps: float = 0.45
     min_samples: int = 2
     min_det_score: float = 0.5
     det_size: int = 640

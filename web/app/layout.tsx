@@ -1,32 +1,55 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { DM_Sans, Fraunces } from "next/font/google";
 import "./globals.css";
+import { AppShell } from "@/components/AppShell";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const dmSans = DM_Sans({
+    variable: "--font-dm-sans",
+    subsets: ["latin"],
+    display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const fraunces = Fraunces({
+    variable: "--font-fraunces",
+    subsets: ["latin"],
+    display: "swap",
+    axes: ["opsz"],
 });
 
 export const metadata: Metadata = {
-  title: "Face Grouping MVP",
-  description: "Upload photos and group faces by person using Supabase + Python worker.",
+    title: "V-Pics · Face Grouping",
+    description: "Upload photos and group faces by person using AI-powered clustering.",
+    manifest: "/manifest.json",
+    appleWebApp: {
+        capable: true,
+        statusBarStyle: "black-translucent",
+        title: "V-Pics",
+    },
+};
+
+export const viewport: Viewport = {
+    themeColor: [
+        { media: "(prefers-color-scheme: light)", color: "#F9F9F9" },
+        { media: "(prefers-color-scheme: dark)", color: "#0D0D0D" },
+    ],
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
 };
 
 export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {children}
-      </body>
-    </html>
-  );
+    children,
+}: Readonly<{ children: React.ReactNode }>) {
+    return (
+        <html lang="en" suppressHydrationWarning>
+            <body className={`${dmSans.variable} ${fraunces.variable}`}
+                style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}>
+                <ThemeProvider>
+                    <AppShell>{children}</AppShell>
+                </ThemeProvider>
+            </body>
+        </html>
+    );
 }
+

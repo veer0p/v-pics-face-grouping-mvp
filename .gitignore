@@ -14,3 +14,5 @@ output*/
 real_test_data/
 real_test_data_upscaled/
 tmp_obama.jpg
+/.venv/bin
+/.venv
