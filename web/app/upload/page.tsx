@@ -1,216 +1,451 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
     Upload, X, CheckCircle, AlertTriangle, Loader,
+    RefreshCw, SkipForward
 } from "lucide-react";
+import * as fflate from "fflate";
+import { extractBrowserExif, uploadToB2, calculateHash, testB2Connectivity } from "@/lib/upload-utils";
 
 type FileEntry = {
+    id: string;
     file: File;
-    preview: string;
-    status: "pending" | "uploading" | "done" | "error";
+    name: string;
+    size: number;
+    preview?: string;
+    status: "pending" | "processing" | "uploading" | "done" | "error" | "duplicate";
+    progress: number;
     error?: string;
+    hash?: string;
 };
+
+const CONCURRENT_UPLOADS = 4;
 
 export default function UploadPage() {
     const router = useRouter();
     const inputRef = useRef<HTMLInputElement>(null);
-    const [files, setFiles] = useState<FileEntry[]>([]);
+    const [entries, setEntries] = useState<FileEntry[]>([]);
     const [uploading, setUploading] = useState(false);
     const [dragOver, setDragOver] = useState(false);
+    const [stats, setStats] = useState({ done: 0, total: 0, errors: 0, duplicates: 0 });
+    const [b2Status, setB2Status] = useState<"idle" | "testing" | "ok" | "fail">("idle");
+    const [b2Error, setB2Error] = useState<string | null>(null);
 
-    const addFiles = useCallback((newFiles: FileList | File[]) => {
-        const entries: FileEntry[] = Array.from(newFiles)
-            .filter((f) => f.type.startsWith("image/"))
-            .map((f) => ({
-                file: f,
-                preview: URL.createObjectURL(f),
-                status: "pending" as const,
-            }));
-        setFiles((prev) => [...prev, ...entries]);
+    const addFiles = useCallback(async (incoming: FileList | File[]) => {
+        const newEntries: FileEntry[] = [];
+
+        for (const file of Array.from(incoming)) {
+            // Handle ZIP
+            const isZip = file.name.toLowerCase().endsWith(".zip") ||
+                file.type === "application/zip" ||
+                file.type.includes("zip");
+
+            if (isZip) {
+                const zipEntries = await processZip(file);
+                newEntries.push(...zipEntries);
+            }
+            // Handle Images
+            else if (file.type.startsWith("image/")) {
+                newEntries.push({
+                    id: Math.random().toString(36).substring(7),
+                    file,
+                    name: file.name,
+                    size: file.size,
+                    preview: URL.createObjectURL(file),
+                    status: "pending",
+                    progress: 0,
+                });
+            }
+        }
+        setEntries((prev) => [...prev, ...newEntries]);
     }, []);
 
-    const removeFile = (index: number) => {
-        setFiles((prev) => {
-            URL.revokeObjectURL(prev[index].preview);
-            return prev.filter((_, i) => i !== index);
+    const processZip = async (zipFile: File): Promise<FileEntry[]> => {
+        // SAFETY: 2GB+ ZIP files will crash browser memory if unzipped via fflate sync
+        if (zipFile.size > 2 * 1024 * 1024 * 1024) {
+            alert(`ZIP file "${zipFile.name}" is too large (2GB+) for browser-side extraction. Please unzip it locally and drag the folder instead.`);
+            return [];
+        }
+
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const buf = new Uint8Array(reader.result as ArrayBuffer);
+                    const unzipped = fflate.unzipSync(buf);
+                    const entries: FileEntry[] = [];
+
+                    for (const [name, data] of Object.entries(unzipped)) {
+                        if (name.includes("__MACOSX") || name.endsWith("/")) continue;
+                        const mime = getMimeFromExt(name);
+                        if (!mime.startsWith("image/")) continue;
+
+                        const blob = new Blob([data as any], { type: mime });
+                        const file = new File([blob], name, { type: mime });
+
+                        entries.push({
+                            id: Math.random().toString(36).substring(7),
+                            file,
+                            name,
+                            size: file.size,
+                            preview: URL.createObjectURL(file),
+                            status: "pending",
+                            progress: 0,
+                        });
+                    }
+                    resolve(entries);
+                } catch (err) {
+                    console.error("ZIP Error:", err);
+                    alert(`Failed to extract ZIP: ${err instanceof Error ? err.message : String(err)}`);
+                    resolve([]);
+                }
+            };
+            reader.onerror = () => resolve([]);
+            reader.readAsArrayBuffer(zipFile);
         });
     };
 
-    const handleDrop = useCallback(
-        (e: React.DragEvent) => {
-            e.preventDefault();
-            setDragOver(false);
-            addFiles(e.dataTransfer.files);
-        },
-        [addFiles],
-    );
+    const getMimeFromExt = (name: string) => {
+        const ext = name.split(".").pop()?.toLowerCase();
+        if (["jpg", "jpeg"].includes(ext!)) return "image/jpeg";
+        if (ext === "png") return "image/png";
+        if (ext === "webp") return "image/webp";
+        if (ext === "heic") return "image/heic";
+        return "application/octet-stream";
+    };
 
-    const handleUpload = async () => {
-        if (files.length === 0 || uploading) return;
+    const runUpload = async (queue: FileEntry[]) => {
         setUploading(true);
+        setStats(s => ({ ...s, total: s.total + queue.length }));
 
-        // Mark all as uploading
-        setFiles((prev) => prev.map((f) => ({ ...f, status: "uploading" as const })));
+        let activeCount = 0;
+        let index = 0;
 
-        try {
-            // Build FormData with all files
-            const formData = new FormData();
-            for (const entry of files) {
-                formData.append("files", entry.file);
+        const processNext = async () => {
+            if (index >= queue.length) return;
+
+            const entry = queue[index++];
+            activeCount++;
+
+            try {
+                // 1. SHA-256 Hashing & EXIF (Parallel)
+                // Hashing for large files is now memory-safe (Quick Fingerprint)
+                updateStatus(entry.id, "processing", 10);
+                const [hash, exif] = await Promise.all([
+                    calculateHash(entry.file).catch(() => "hash_err"),
+                    extractBrowserExif(entry.file).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 }))
+                ]);
+
+                // 2. Presigned URL from Server
+                updateStatus(entry.id, "processing", 30);
+                const preRes = await fetch(`/api/upload/presign?filename=${encodeURIComponent(entry.name)}&type=${entry.file.type}`);
+                if (!preRes.ok) throw new Error(`Presign API Error: ${preRes.status}`);
+                const { originalKey, thumbKey, uploadUrl, fileId } = await preRes.json();
+
+                // 3. Direct Upload to B2
+                updateStatus(entry.id, "uploading", 30);
+                await uploadToB2(entry.file, uploadUrl, (p) => {
+                    updateStatus(entry.id, "uploading", 30 + (p * 0.6));
+                }).catch(err => {
+                    throw new Error(`B2 Upload Failure (CORS or Network): ${err.message}`);
+                });
+
+                // 4. Notify DB Completion & Check for Duplicates
+                const compRes = await fetch("/api/upload/complete", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        id: fileId,
+                        original_key: originalKey,
+                        original_name: entry.name,
+                        thumb_key: thumbKey,
+                        mime_type: entry.file.type,
+                        size_bytes: entry.file.size,
+                        width: exif.width,
+                        height: exif.height,
+                        taken_at: exif.takenAt,
+                        content_hash: hash,
+                        metadata: exif.metadata,
+                    }),
+                });
+
+                const compData = await compRes.json();
+
+                if (!compRes.ok) {
+                    // Check if it's a unique constraint error (duplicate)
+                    if (compData.error?.includes("duplicate") || compRes.status === 409 || (compRes.status === 500 && compData.error?.includes("duplicate"))) {
+                        updateStatus(entry.id, "duplicate", 100);
+                        setStats(s => ({ ...s, duplicates: s.duplicates + 1 }));
+                        return;
+                    }
+                    throw new Error(`DB Completion Error: ${compData.error || compRes.status}`);
+                }
+
+                updateStatus(entry.id, "done", 100);
+                setStats(s => ({ ...s, done: s.done + 1 }));
+            } catch (err: any) {
+                console.error(`Upload error for ${entry.name}:`, err);
+                updateStatus(entry.id, "error", 0, err.message || String(err));
+                setStats(s => ({ ...s, errors: s.errors + 1 }));
+            } finally {
+                activeCount--;
+                processNext();
             }
+        };
 
-            const res = await fetch("/api/upload", {
-                method: "POST",
-                body: formData,
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || `Upload failed (${res.status})`);
-            }
-
-            // Mark all as done
-            setFiles((prev) => prev.map((f) => ({ ...f, status: "done" as const })));
-
-            // Navigate home after short delay
-            setTimeout(() => router.push("/"), 1200);
-        } catch (err) {
-            console.error("Upload error:", err);
-            setFiles((prev) =>
-                prev.map((f) =>
-                    f.status === "uploading"
-                        ? { ...f, status: "error" as const, error: String(err) }
-                        : f,
-                ),
-            );
-        } finally {
-            setUploading(false);
+        // Start initial batch
+        for (let i = 0; i < Math.min(CONCURRENT_UPLOADS, queue.length); i++) {
+            processNext();
         }
     };
 
-    const pendingCount = files.filter((f) => f.status === "pending").length;
+    const handleUpload = () => {
+        const pending = entries.filter(e => e.status === "pending" || e.status === "error");
+        if (pending.length === 0) return;
+
+        // Reset local run stats
+        setStats({ done: 0, total: 0, errors: 0, duplicates: 0 });
+        runUpload(pending);
+    };
+
+    const retryFile = (id: string) => {
+        const entry = entries.find(e => e.id === id);
+        if (entry) runUpload([entry]);
+    };
+
+    const updateStatus = (id: string, status: FileEntry["status"], progress: number, error?: string) => {
+        setEntries(prev => prev.map(e => e.id === id ? { ...e, status, progress, error } : e));
+    };
+
+    useEffect(() => {
+        if (uploading && stats.done + stats.errors + stats.duplicates === stats.total && stats.total > 0) {
+            setUploading(false);
+            if (stats.errors === 0) {
+                setTimeout(() => router.push("/"), 2000);
+            }
+        }
+    }, [stats, uploading, router]);
+
+    const globalProgress = stats.total > 0 ? ((stats.done + stats.duplicates) / stats.total) * 100 : 0;
 
     return (
         <div className="page-shell">
-            <h1 style={{
-                fontFamily: "var(--font-display)", fontStyle: "italic",
-                fontSize: "1.6rem", fontWeight: 700, marginBottom: "1.25rem",
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                <div>
+                    <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.5rem" }}>Bulk Export</h1>
+                    <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Direct-to-B2 with De-duplication</p>
+                </div>
+                {entries.length > 0 && !uploading && (
+                    <button className="btn btn-ghost btn-sm" onClick={() => { setEntries([]); setStats({ done: 0, total: 0, errors: 0, duplicates: 0 }); }}>Clear</button>
+                )}
+            </div>
+
+            {/* B2 Connection Tester */}
+            <div style={{
+                marginBottom: "1rem", padding: "0.75rem", borderRadius: "var(--r-md)",
+                background: b2Status === "ok" ? "rgba(16,185,129,0.1)" : b2Status === "fail" ? "rgba(239,68,68,0.1)" : "var(--bg-subtle)",
+                border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between"
             }}>
-                Upload Photos
-            </h1>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    {b2Status === "testing" ? <Loader size={16} className="spin" color="var(--accent)" /> :
+                        b2Status === "ok" ? <CheckCircle size={16} color="#10B981" /> :
+                            b2Status === "fail" ? <AlertTriangle size={16} color="#EF4444" /> :
+                                <RefreshCw size={16} color="var(--muted)" />}
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>
+                        {b2Status === "idle" ? "B2 Cloud Storage Status" :
+                            b2Status === "testing" ? "Testing Connection..." :
+                                b2Status === "ok" ? "Storage Ready!" : "Store Failure (Check CORS)"}
+                    </span>
+                </div>
+                <button
+                    className="btn btn-sm"
+                    style={{ fontSize: "0.7rem", height: "1.8rem", padding: "0 0.6rem" }}
+                    onClick={async (e) => {
+                        e.stopPropagation();
+                        setB2Status("testing");
+                        const res = await testB2Connectivity();
+                        if (res.ok) setB2Status("ok");
+                        else {
+                            setB2Status("fail");
+                            setB2Error(res.error || "Unknown Error");
+                        }
+                    }}
+                    disabled={b2Status === "testing"}
+                >
+                    Test Storage
+                </button>
+            </div>
+
+            {b2Status === "fail" && (
+                <div style={{
+                    marginBottom: "1rem", padding: "0.75rem", background: "var(--error-soft)",
+                    borderRadius: "var(--r-sm)", border: "1px solid rgba(239,68,68,0.2)"
+                }}>
+                    <p style={{ fontSize: "0.75rem", color: "var(--error)", fontWeight: 700 }}>{b2Error}</p>
+                    <div style={{ fontSize: "0.7rem", color: "var(--error)", marginTop: "0.4rem", lineHeight: 1.4 }}>
+                        <p style={{ marginBottom: "0.3rem" }}><b>Note:</b> If Status is 0, check B2 CORS or turn off Brave/Browser Shields.</p>
+                        <p style={{ marginBottom: "0.3rem" }}><b>Step 1:</b> Add origin: <code>{typeof window !== "undefined" ? window.location.origin : ""}</code></p>
+                        <p><b>Step 2:</b> Allow <b>PUT</b> and <b>GET</b> in B2 Dashboard.</p>
+                    </div>
+                </div>
+            )}
 
             {/* Drop Zone */}
             <div
-                className={`panel press-scale${dragOver ? " drag-over" : ""}`}
+                className={`panel${dragOver ? " drag-over" : ""}`}
                 style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", gap: "0.75rem", padding: "2.5rem 1.5rem",
-                    marginBottom: "1.25rem", cursor: "pointer",
-                    border: dragOver ? "2px dashed var(--accent)" : "1px solid var(--line)",
-                    background: dragOver ? "var(--accent-soft)" : "var(--bg-elevated)",
-                    transition: "all 200ms ease",
+                    justifyContent: "center", gap: "0.5rem", padding: "2.5rem 1rem",
+                    marginBottom: "1.5rem", border: "2px dashed var(--line)",
+                    borderRadius: "var(--r-lg)", transition: "all 0.2s",
                 }}
-                onClick={() => inputRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
-                onDrop={handleDrop}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
+                onClick={() => inputRef.current?.click()}
             >
-                <Upload size={32} strokeWidth={1.5} color="var(--accent)" />
-                <p style={{ fontWeight: 600, fontSize: "0.95rem" }}>
-                    Tap to select or drag photos here
+                <div style={{ padding: "0.75rem", borderRadius: "50%", background: "var(--accent-soft)" }}>
+                    <Upload size={28} color="var(--accent)" />
+                </div>
+                <p style={{ fontWeight: 600, fontSize: "0.9rem" }}>Upload Photos & ZIPs</p>
+
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                    <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+                        Select Photos
+                    </button>
+                    <button className="btn btn-secondary btn-sm" onClick={(e) => {
+                        e.stopPropagation();
+                        const zipInput = document.createElement('input');
+                        zipInput.type = 'file';
+                        zipInput.multiple = true;
+                        zipInput.accept = '.zip,application/zip';
+                        zipInput.onchange = (ev: any) => addFiles(ev.target.files);
+                        zipInput.click();
+                    }}>
+                        Select ZIP
+                    </button>
+                </div>
+
+                <p style={{ fontSize: "0.65rem", color: "var(--muted)", marginTop: "0.5rem", opacity: 0.8 }}>
+                    On mobile, use &quot;Files&quot; or &quot;Browse&quot; for ZIPs.
                 </p>
-                <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
-                    JPEG, PNG, HEIC • Max 50 photos per batch
-                </p>
+
                 <input
-                    ref={inputRef} type="file" accept="image/*" multiple
-                    style={{ display: "none" }}
-                    onChange={(e) => e.target.files && addFiles(e.target.files)}
+                    ref={inputRef}
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    hidden
+                    onChange={(e) => {
+                        console.log("[UPLOAD_INPUT] Files selected:", e.target.files?.length);
+                        if (e.target.files) addFiles(e.target.files);
+                    }}
                 />
             </div>
 
-            {/* Preview Grid */}
-            {files.length > 0 && (
-                <>
-                    <div style={{
-                        display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                        gap: "0.5rem", marginBottom: "1.25rem",
-                    }}>
-                        {files.map((entry, i) => (
-                            <div key={i} style={{
-                                position: "relative", aspectRatio: "1",
-                                borderRadius: "var(--r-sm)", overflow: "hidden",
-                                background: "var(--bg-subtle)",
-                            }}>
-                                <img src={entry.preview} alt={entry.file.name} style={{
-                                    width: "100%", height: "100%", objectFit: "cover",
-                                    opacity: entry.status === "done" ? 0.6 : 1,
-                                }} />
-                                {entry.status === "uploading" && (
-                                    <div style={{
-                                        position: "absolute", inset: 0, display: "flex",
-                                        alignItems: "center", justifyContent: "center",
-                                        background: "rgba(0,0,0,0.4)",
-                                    }}>
-                                        <Loader size={20} color="#fff" className="spin" />
-                                    </div>
-                                )}
-                                {entry.status === "done" && (
-                                    <div style={{
-                                        position: "absolute", inset: 0, display: "flex",
-                                        alignItems: "center", justifyContent: "center",
-                                        background: "rgba(0,0,0,0.3)",
-                                    }}>
-                                        <CheckCircle size={24} color="#4ade80" strokeWidth={2.5} />
-                                    </div>
-                                )}
-                                {entry.status === "error" && (
-                                    <div style={{
-                                        position: "absolute", inset: 0, display: "flex",
-                                        flexDirection: "column", alignItems: "center",
-                                        justifyContent: "center", background: "rgba(0,0,0,0.5)",
-                                        padding: "0.5rem",
-                                    }}>
-                                        <AlertTriangle size={20} color="#f87171" strokeWidth={2.5} />
-                                        <p style={{ color: "#f87171", fontSize: "0.65rem", marginTop: 4, textAlign: "center" }}>
-                                            {entry.error || "Failed"}
-                                        </p>
-                                    </div>
-                                )}
-                                {entry.status === "pending" && (
-                                    <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{
-                                        position: "absolute", top: 4, right: 4, width: 22, height: 22,
-                                        borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none",
-                                        color: "#fff", display: "flex", alignItems: "center",
-                                        justifyContent: "center", cursor: "pointer", padding: 0, minHeight: "unset",
-                                    }}>
-                                        <X size={12} strokeWidth={3} />
-                                    </button>
-                                )}
-                            </div>
-                        ))}
+            {/* Global Summary */}
+            {entries.length > 0 && (
+                <div style={{ marginBottom: "1.25rem", padding: "1rem", borderRadius: "var(--r-md)", background: "var(--bg-subtle)", border: "1px solid var(--line)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.5rem" }}>
+                        <span>Overall Status</span>
+                        <span>{Math.round(globalProgress)}%</span>
                     </div>
-
-                    <button
-                        className="btn btn-primary"
-                        style={{ width: "100%", gap: "0.5rem" }}
-                        onClick={handleUpload}
-                        disabled={uploading || files.every((f) => f.status === "done")}
-                    >
-                        {uploading ? (
-                            <><Loader size={16} className="spin" /> Uploading…</>
-                        ) : files.every((f) => f.status === "done") ? (
-                            <><CheckCircle size={16} /> All uploaded! Redirecting…</>
-                        ) : (
-                            <><Upload size={16} /> Upload {pendingCount} {pendingCount === 1 ? "Photo" : "Photos"}</>
-                        )}
-                    </button>
-                </>
+                    <div style={{ width: "100%", height: 8, background: "rgba(0,0,0,0.05)", borderRadius: 4, overflow: "hidden", marginBottom: "0.75rem" }}>
+                        <div style={{ width: `${globalProgress}%`, height: "100%", background: "var(--accent)", transition: "width 0.3s" }} />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.5rem", textAlign: "center" }}>
+                        <div style={{ background: "var(--bg-card)", padding: "0.4rem", borderRadius: "var(--r-sm)" }}>
+                            <p style={{ fontSize: "0.65rem", color: "var(--muted)" }}>Queue</p>
+                            <p style={{ fontSize: "0.9rem", fontWeight: 700 }}>{entries.filter(e => e.status === "pending").length}</p>
+                        </div>
+                        <div style={{ background: "var(--bg-card)", padding: "0.4rem", borderRadius: "var(--r-sm)" }}>
+                            <p style={{ fontSize: "0.65rem", color: "var(--muted)" }}>Done</p>
+                            <p style={{ fontSize: "0.9rem", fontWeight: 700, color: "#10B981" }}>{stats.done}</p>
+                        </div>
+                        <div style={{ background: "var(--bg-card)", padding: "0.4rem", borderRadius: "var(--r-sm)" }}>
+                            <p style={{ fontSize: "0.65rem", color: "var(--muted)" }}>Dupes</p>
+                            <p style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--accent)" }}>{stats.duplicates}</p>
+                        </div>
+                        <div style={{ background: "var(--bg-card)", padding: "0.4rem", borderRadius: "var(--r-sm)" }}>
+                            <p style={{ fontSize: "0.65rem", color: "var(--muted)" }}>Fail</p>
+                            <p style={{ fontSize: "0.9rem", fontWeight: 700, color: "#EF4444" }}>{stats.errors}</p>
+                        </div>
+                    </div>
+                </div>
             )}
+
+            {/* File List */}
+            {entries.length > 0 && (
+                <div style={{ display: "grid", gap: "0.5rem" }}>
+                    {entries.map((e) => (
+                        <div key={e.id} style={{
+                            display: "flex", gap: "0.75rem", alignItems: "center", padding: "0.5rem",
+                            background: "var(--bg-elevated)", border: "1px solid var(--line)", borderRadius: "var(--r-md)"
+                        }}>
+                            <div style={{ width: 32, height: 32, borderRadius: 4, overflow: "hidden", background: "var(--bg-subtle)", flexShrink: 0 }}>
+                                <img src={e.preview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                                    <p style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</p>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                        {e.status === "error" && (
+                                            <button onClick={() => retryFile(e.id)} style={{ border: "none", background: "none", color: "var(--accent)", padding: 0 }} title="Retry">
+                                                <RefreshCw size={12} />
+                                            </button>
+                                        )}
+                                        <span style={{ fontSize: "0.7rem", color: "var(--muted)" }}>
+                                            {e.status === "done" ? <CheckCircle size={12} color="#10B981" /> :
+                                                e.status === "duplicate" ? <SkipForward size={12} color="var(--accent)" /> :
+                                                    e.status === "error" ? <AlertTriangle size={12} color="#EF4444" /> :
+                                                        e.status === "processing" ? "..." :
+                                                            `${Math.round(e.progress)}%`}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div style={{ width: "100%", height: 3, background: "rgba(0,0,0,0.03)", borderRadius: 2, overflow: "hidden", marginTop: 4 }}>
+                                    <div style={{
+                                        width: `${e.progress}%`, height: "100%",
+                                        background: e.status === "error" ? "#EF4444" :
+                                            e.status === "duplicate" ? "var(--muted)" :
+                                                e.status === "done" ? "#10B981" : "var(--accent)",
+                                        transition: "width 0.1s"
+                                    }} />
+                                </div>
+                                {e.error && <p style={{ fontSize: "0.6rem", color: "#EF4444", marginTop: 2 }}>{e.error}</p>}
+                            </div>
+                        </div>
+                    )).slice(-50)}
+                    {entries.length > 50 && <p style={{ textAlign: "center", fontSize: "0.7rem", color: "var(--muted)", padding: "0.5rem" }}>+ {entries.length - 50} more files</p>}
+                </div>
+            )}
+
+            {!uploading && entries.some(e => e.status === "pending" || e.status === "error") && (
+                <div style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom))", left: 16, right: 16, zIndex: 100 }}>
+                    <button className="btn btn-primary" style={{ width: "100%", height: 50, fontSize: "0.95rem" }} onClick={handleUpload}>
+                        {entries.some(e => e.status === "error") ? "Retry Failed Uploads" : `Start Uploading ${entries.length} Files`}
+                    </button>
+                </div>
+            )}
+
+            {/* Debug Console for User */}
+            <details style={{ marginTop: "2rem", opacity: 0.6 }}>
+                <summary style={{ fontSize: "0.7rem", color: "var(--muted)", cursor: "pointer" }}>Technical Debug Logs</summary>
+                <div style={{
+                    maxHeight: "150px", overflowY: "auto", fontSize: "0.65rem", fontFamily: "monospace",
+                    padding: "0.5rem", background: "var(--bg-subtle)", borderRadius: "var(--r-sm)", marginTop: "0.5rem"
+                }}>
+                    {entries.filter(e => e.error).map((e, i) => (
+                        <p key={i} style={{ color: "#EF4444", marginBottom: "0.2rem" }}>
+                            [{e.name}] Error: {e.error}
+                        </p>
+                    ))}
+                    <p style={{ color: "var(--muted)" }}>Check your terminal (npm run dev) for server-side logs starting with [UPLOAD].</p>
+                </div>
+            </details>
         </div>
     );
 }

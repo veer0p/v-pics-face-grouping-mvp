@@ -17,3 +17,4 @@ tmp_obama.jpg
 /.venv/bin
 /.venv
 web/package-lock.json
+/.next

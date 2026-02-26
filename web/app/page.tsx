@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
     Upload, Image, Loader, RefreshCw, Trash2, X, CheckCircle, Heart, FolderPlus, Plus,
@@ -15,10 +15,11 @@ type Photo = {
     mimeType: string;
     sizeBytes: number;
     isLiked: boolean;
+    takenAt: string | null;
     createdAt: string;
 };
 
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 40;
 
 export default function HomePage() {
     const router = useRouter();
@@ -63,7 +64,6 @@ export default function HomePage() {
 
     useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
 
-    // Infinite scroll
     useEffect(() => {
         const el = observerRef.current;
         if (!el) return;
@@ -89,6 +89,7 @@ export default function HomePage() {
 
     const handleDelete = async () => {
         if (selected.size === 0 || deleting) return;
+        if (!confirm(`Are you sure you want to delete ${selected.size} photo(s)?`)) return;
         setDeleting(true);
         try {
             await fetch("/api/photos/delete", {
@@ -156,54 +157,69 @@ export default function HomePage() {
         }
     };
 
-    const filteredPhotos = filter === "favorites"
-        ? photos.filter((p) => p.isLiked)
-        : photos;
+    const filteredPhotos = useMemo(() => {
+        return filter === "favorites" ? photos.filter((p) => p.isLiked) : photos;
+    }, [photos, filter]);
+
+    // Grouping Logic
+    const groupedPhotos = useMemo(() => {
+        const groups: { title: string; photos: Photo[] }[] = [];
+        filteredPhotos.forEach((photo) => {
+            const date = new Date(photo.takenAt || photo.createdAt);
+            const title = formatDateHeader(date);
+            const lastGroup = groups[groups.length - 1];
+            if (lastGroup && lastGroup.title === title) {
+                lastGroup.photos.push(photo);
+            } else {
+                groups.push({ title, photos: [photo] });
+            }
+        });
+        return groups;
+    }, [filteredPhotos]);
+
+    function formatDateHeader(date: Date) {
+        const now = new Date();
+        const yesterday = new Date();
+        yesterday.setDate(now.getDate() - 1);
+
+        if (date.toDateString() === now.toDateString()) return "Today";
+        if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+
+        const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined };
+        return date.toLocaleDateString(undefined, options);
+    }
 
     return (
         <div className="page-shell">
             {/* Header */}
             <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: "0.75rem",
+                marginBottom: "1rem", position: "sticky", top: 0, zIndex: 50,
+                background: "var(--bg-card)", paddingBottom: "0.5rem",
             }}>
-                <h1 style={{
-                    fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontSize: "1.5rem", fontWeight: 700,
-                }}>
+                <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.5rem", fontWeight: 700 }}>
                     Photos
                 </h1>
                 <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
                     {selectMode ? (
                         <>
-                            <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 600 }}>
-                                {selected.size} selected
-                            </span>
-                            <button className="app-header-btn" onClick={handleDelete}
-                                disabled={deleting} style={{ color: "var(--error)" }}>
+                            <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 600 }}>{selected.size} selected</span>
+                            <button className="app-header-btn" onClick={handleDelete} disabled={deleting} style={{ color: "var(--error)" }}>
                                 {deleting ? <Loader size={18} className="spin" /> : <Trash2 size={18} />}
                             </button>
-                            <button className="app-header-btn" onClick={() => setSelected(new Set())}>
-                                <X size={18} />
-                            </button>
+                            <button className="app-header-btn" onClick={() => setSelected(new Set())}><X size={18} /></button>
                         </>
                     ) : (
                         <>
-                            <button
-                                className={`app-header-btn${filter === "favorites" ? " active" : ""}`}
+                            <button className={`app-header-btn${filter === "favorites" ? " active" : ""}`}
                                 onClick={() => setFilter(filter === "all" ? "favorites" : "all")}
-                                title="Filter favorites"
-                                style={filter === "favorites" ? { color: "#ff4d6a" } : {}}
-                            >
-                                <Heart size={18} fill={filter === "favorites" ? "#ff4d6a" : "none"}
-                                    color={filter === "favorites" ? "#ff4d6a" : undefined} />
+                                style={filter === "favorites" ? { color: "#ff4d6a" } : {}}>
+                                <Heart size={18} fill={filter === "favorites" ? "#ff4d6a" : "none"} color={filter === "favorites" ? "#ff4d6a" : undefined} />
                             </button>
-                            <button className="app-header-btn" onClick={() => fetchPhotos()}
-                                disabled={loading}>
+                            <button className="app-header-btn" onClick={() => fetchPhotos()} disabled={loading}>
                                 <RefreshCw size={18} className={loading ? "spin" : ""} />
                             </button>
-                            <button className="btn btn-primary btn-sm"
-                                onClick={() => router.push("/upload")} style={{ gap: "0.35rem" }}>
+                            <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")} style={{ gap: "0.35rem" }}>
                                 <Upload size={14} strokeWidth={2.5} /> Upload
                             </button>
                         </>
@@ -211,112 +227,73 @@ export default function HomePage() {
                 </div>
             </div>
 
-            {/* Loading */}
             {loading && photos.length === 0 && (
-                <div className="empty-state" style={{ minHeight: 300 }}>
+                <div className="empty-state" style={{ minHeight: "50vh" }}>
                     <Loader size={28} className="spin" color="var(--accent)" />
-                    <p className="empty-state-sub">Loading photos…</p>
                 </div>
             )}
 
-            {/* Error */}
             {error && (
-                <div style={{
-                    padding: "0.75rem 1rem", background: "var(--error-soft)",
-                    borderRadius: "var(--r-sm)", color: "var(--error)",
-                    fontWeight: 600, fontSize: "0.88rem", marginBottom: "1rem",
-                }}>{error}</div>
+                <div style={{ padding: "0.75rem 1rem", background: "var(--error-soft)", borderRadius: "var(--r-sm)", color: "var(--error)", fontWeight: 600, fontSize: "0.88rem", marginBottom: "1rem" }}>{error}</div>
             )}
 
-            {/* Empty */}
             {!loading && !error && filteredPhotos.length === 0 && (
-                <div className="empty-state" style={{ minHeight: 300 }}>
-                    <div style={{
-                        width: 64, height: 64, borderRadius: "var(--r-lg)",
-                        background: "var(--accent-soft)", display: "flex",
-                        alignItems: "center", justifyContent: "center", marginBottom: "0.5rem",
-                    }}>
-                        {filter === "favorites" ?
-                            <Heart size={28} color="#ff4d6a" strokeWidth={1.5} /> :
-                            <Image size={28} color="var(--accent)" strokeWidth={1.5} />
-                        }
-                    </div>
-                    <p className="empty-state-title">
-                        {filter === "favorites" ? "No favorites yet" : "No photos yet"}
-                    </p>
-                    <p className="empty-state-sub">
-                        {filter === "favorites"
-                            ? "Tap ♥ on photos to mark them as favorites."
-                            : "Upload your first photos to get started."}
-                    </p>
-                    {filter === "all" && (
-                        <button className="btn btn-primary" onClick={() => router.push("/upload")}
-                            style={{ marginTop: "0.75rem", gap: "0.4rem" }}>
-                            <Upload size={16} /> Upload Photos
-                        </button>
-                    )}
+                <div className="empty-state" style={{ minHeight: "50vh" }}>
+                    <p className="empty-state-title">{filter === "favorites" ? "No favorites yet" : "No photos yet"}</p>
+                    <button className="btn btn-primary" onClick={() => router.push("/upload")} style={{ marginTop: "1rem" }}>Upload Photos</button>
                 </div>
             )}
 
-            {/* Photo Grid */}
-            {filteredPhotos.length > 0 && (
-                <div style={{
-                    display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: "3px", borderRadius: "var(--r-sm)", overflow: "hidden",
-                }}>
-                    {filteredPhotos.map((photo) => {
-                        const isSelected = selected.has(photo.id);
-                        return (
-                            <div key={photo.id} className="press-scale" style={{
-                                position: "relative", aspectRatio: "1",
-                                background: "var(--bg-subtle)", cursor: "pointer",
-                            }}
-                                onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
-                                onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
-                            >
-                                <img src={photo.thumbUrl || photo.url} alt={photo.filename}
-                                    loading="lazy" style={{
+            {/* Chronological Grid */}
+            {groupedPhotos.map((group) => (
+                <div key={group.title} style={{ marginBottom: "2rem" }}>
+                    <h2 style={{
+                        fontSize: "0.9rem", fontWeight: 700, color: "var(--ink-1)",
+                        marginBottom: "0.75rem", padding: "0 4px",
+                    }}>
+                        {group.title}
+                    </h2>
+                    <div style={{
+                        display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+                        gap: "2px", borderRadius: "12px", overflow: "hidden"
+                    }}>
+                        {group.photos.map((photo) => {
+                            const isSelected = selected.has(photo.id);
+                            return (
+                                <div key={photo.id} className="press-scale" style={{
+                                    position: "relative", aspectRatio: "1",
+                                    background: "var(--bg-subtle)", cursor: "pointer",
+                                }}
+                                    onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
+                                    onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
+                                >
+                                    <img src={photo.thumbUrl || photo.url} alt="" loading="lazy" style={{
                                         width: "100%", height: "100%", objectFit: "cover", display: "block",
                                         opacity: isSelected ? 0.6 : 1, transition: "opacity 150ms",
                                     }} />
-                                {photo.isLiked && !selectMode && (
-                                    <Heart size={14} fill="#ff4d6a" color="#ff4d6a" style={{
-                                        position: "absolute", bottom: 4, right: 4,
-                                        filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.5))",
-                                    }} />
-                                )}
-                                {isSelected && (
-                                    <div style={{
-                                        position: "absolute", top: 6, right: 6, width: 24, height: 24,
-                                        borderRadius: "50%", background: "var(--accent)",
-                                        display: "flex", alignItems: "center", justifyContent: "center",
-                                        boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
-                                    }}>
-                                        <CheckCircle size={14} color="#fff" strokeWidth={3} />
-                                    </div>
-                                )}
-                                {selectMode && !isSelected && (
-                                    <div style={{
-                                        position: "absolute", top: 6, right: 6, width: 24, height: 24,
-                                        borderRadius: "50%", border: "2px solid rgba(255,255,255,0.7)",
-                                        background: "rgba(0,0,0,0.2)",
-                                    }} />
-                                )}
-                            </div>
-                        );
-                    })}
+                                    {photo.isLiked && !selectMode && (
+                                        <Heart size={14} fill="#ff4d6a" color="#ff4d6a" style={{ position: "absolute", bottom: 4, right: 4 }} />
+                                    )}
+                                    {isSelected && (
+                                        <div style={{
+                                            position: "absolute", top: 6, right: 6, width: 22, height: 22,
+                                            borderRadius: "50%", background: "var(--accent)",
+                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                        }}>
+                                            <CheckCircle size={14} color="#fff" strokeWidth={3} />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
-            )}
+            ))}
 
-            {/* Infinite scroll sentinel */}
-            <div ref={observerRef} style={{ height: 1 }} />
-            {loadingMore && (
-                <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
-                    <Loader size={20} className="spin" color="var(--accent)" />
-                </div>
-            )}
+            <div ref={observerRef} style={{ height: 100 }} />
+            {loadingMore && <div style={{ textAlign: "center", padding: "1rem" }}><Loader size={20} className="spin" color="var(--accent)" /></div>}
 
-            {/* Select action bar */}
+            {/* Select action bar (same as before) */}
             {selectMode && (
                 <div style={{
                     position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom))",
@@ -335,14 +312,10 @@ export default function HomePage() {
                         {selected.size === filteredPhotos.length ? "Deselect All" : "Select All"}
                     </button>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
-                        <button className="btn btn-sm" style={{
-                            background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700,
-                        }} onClick={handleOpenAlbumPicker}>
+                        <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
                             <FolderPlus size={14} /> Album
                         </button>
-                        <button className="btn btn-sm" style={{
-                            background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700,
-                        }} onClick={handleDelete} disabled={deleting}>
+                        <button className="btn btn-sm" style={{ background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleDelete} disabled={deleting}>
                             {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
                             Delete {selected.size}
                         </button>
@@ -350,7 +323,7 @@ export default function HomePage() {
                 </div>
             )}
 
-            {/* Album Picker Modal */}
+            {/* Album Picker Modal (same as before) */}
             {showAlbumPicker && (
                 <div style={{
                     position: "fixed", inset: 0, zIndex: 100,
@@ -363,22 +336,15 @@ export default function HomePage() {
                         borderRadius: "1.25rem 1.25rem 0 0", padding: "1.25rem",
                         paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
                         boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
-                        animation: "slide-up 250ms cubic-bezier(0.16, 1, 0.3, 1)",
                     }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
                             <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Add to collection</h3>
-                            <button onClick={() => setShowAlbumPicker(false)} style={{ border: "none", background: "none", color: "var(--muted)" }}>
-                                <X size={20} />
-                            </button>
+                            <button onClick={() => setShowAlbumPicker(false)} style={{ border: "none", background: "none", color: "var(--muted)" }}><X size={20} /></button>
                         </div>
-
-                        <div style={{ maxHeight: "50vh", overflowY: "auto", display: "grid", gap: "0.5rem" }}>
-                            <button className="album-picker-item" onClick={handleCreateAndAdd} style={{ color: "var(--accent)" }}>
-                                <Plus size={18} /> <span>New Album</span>
-                            </button>
+                        <div style={{ maxHeight: "40vh", overflowY: "auto", display: "grid", gap: "0.5rem" }}>
+                            <button className="album-picker-item" onClick={handleCreateAndAdd} style={{ color: "var(--accent)" }}><Plus size={18} /> <span>New Album</span></button>
                             {albums.map((a) => (
-                                <button key={a.id} className="album-picker-item" onClick={() => handleAddToAlbum(a.id)}
-                                    disabled={!!addingToAlbum}>
+                                <button key={a.id} className="album-picker-item" onClick={() => handleAddToAlbum(a.id)} disabled={!!addingToAlbum}>
                                     {addingToAlbum === a.id ? <Loader size={18} className="spin" /> : <Image size={18} color="var(--muted)" />}
                                     <span>{a.name}</span>
                                 </button>
@@ -399,13 +365,6 @@ export default function HomePage() {
                             font-weight: 600;
                             cursor: pointer;
                             text-align: left;
-                        }
-                        .album-picker-item:hover {
-                            border-color: var(--accent);
-                        }
-                        @keyframes slide-up {
-                            from { transform: translateY(100%); }
-                            to { transform: translateY(0); }
                         }
                     `}</style>
                 </div>
