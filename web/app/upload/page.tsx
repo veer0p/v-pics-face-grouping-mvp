@@ -1,345 +1,216 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, FolderOpen, Link2, CloudUpload, Settings, ChevronDown, AlertTriangle, Rocket, X, Check } from "lucide-react";
-import type { InitUploadResponse, UploadFileInput } from "@/types/api";
+import {
+    Upload, X, CheckCircle, AlertTriangle, Loader,
+} from "lucide-react";
 
-const MB = 1024 * 1024;
-const MAX_FILES = 30;
+type FileEntry = {
+    file: File;
+    preview: string;
+    status: "pending" | "uploading" | "done" | "error";
+    error?: string;
+};
 
-function fmt(bytes: number) {
-    return bytes < MB ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / MB).toFixed(2)} MB`;
-}
-
-type UploadState = "idle" | "uploading" | "done" | "failed";
-type FileProgress = Record<string, "pending" | "uploaded" | "failed">;
-
-export default function HomePage() {
+export default function UploadPage() {
     const router = useRouter();
     const inputRef = useRef<HTMLInputElement>(null);
-
-    const [files, setFiles] = useState<File[]>([]);
-    const [previews, setPreviews] = useState<Record<string, string>>({});
+    const [files, setFiles] = useState<FileEntry[]>([]);
+    const [uploading, setUploading] = useState(false);
     const [dragOver, setDragOver] = useState(false);
-    const [uploadState, setUploadState] = useState<UploadState>("idle");
-    const [progress, setProgress] = useState<FileProgress>({});
-    const [error, setError] = useState<string | null>(null);
-    const [settingsOpen, setSettings] = useState(false);
 
-    // Algorithm settings
-    const [eps, setEps] = useState("0.35");
-    const [minSamples, setMinSamples] = useState("2");
-    const [minDetScore, setMinDetScore] = useState("0.5");
-
-    const totalBytes = useMemo(() => files.reduce((s, f) => s + f.size, 0), [files]);
-    const submitting = uploadState === "uploading";
-
-    const addFiles = useCallback((incoming: File[]) => {
-        setError(null);
-        setProgress({});
-        setFiles((prev) => {
-            const names = new Set(prev.map((f) => f.name));
-            const merged = [...prev, ...incoming.filter((f) => !names.has(f.name))].slice(0, MAX_FILES);
-            // generate previews
-            merged.forEach((f) => {
-                if (!previews[f.name]) {
-                    const url = URL.createObjectURL(f);
-                    setPreviews((p) => ({ ...p, [f.name]: url }));
-                }
-            });
-            return merged;
-        });
-    }, [previews]);
-
-    const removeFile = (name: string) => {
-        setFiles((prev) => prev.filter((f) => f.name !== name));
-        setPreviews((prev) => {
-            const next = { ...prev };
-            if (next[name]) URL.revokeObjectURL(next[name]);
-            delete next[name];
-            return next;
-        });
-    };
-
-    const onDrop = (e: React.DragEvent) => {
-        e.preventDefault();
-        setDragOver(false);
-        const dropped = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-        addFiles(dropped);
-    };
-
-    const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const selected = Array.from(e.target.files ?? []);
-        addFiles(selected);
-        e.target.value = "";
-    };
-
-    async function startUpload() {
-        setError(null);
-        if (files.length === 0) { setError("Select at least one image."); return; }
-        if (files.length > MAX_FILES) { setError(`Max ${MAX_FILES} images.`); return; }
-
-        const eps_n = Number(eps);
-        const ms_n = Number(minSamples);
-        const mds_n = Number(minDetScore);
-        if (isNaN(eps_n) || isNaN(ms_n) || isNaN(mds_n)) { setError("Invalid config values."); return; }
-
-        setUploadState("uploading");
-        try {
-            const uploadFiles: UploadFileInput[] = files.map((f) => ({
-                name: f.name, type: f.type || "application/octet-stream", size: f.size,
+    const addFiles = useCallback((newFiles: FileList | File[]) => {
+        const entries: FileEntry[] = Array.from(newFiles)
+            .filter((f) => f.type.startsWith("image/"))
+            .map((f) => ({
+                file: f,
+                preview: URL.createObjectURL(f),
+                status: "pending" as const,
             }));
+        setFiles((prev) => [...prev, ...entries]);
+    }, []);
 
-            const initRes = await fetch("/api/upload/init", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ files: uploadFiles, config: { eps: eps_n, minSamples: ms_n, minDetScore: mds_n } }),
-            });
-            const initData = (await initRes.json()) as InitUploadResponse | { error: string };
-            if (!initRes.ok || !("jobId" in initData)) throw new Error("error" in initData ? initData.error : "Init failed");
+    const removeFile = (index: number) => {
+        setFiles((prev) => {
+            URL.revokeObjectURL(prev[index].preview);
+            return prev.filter((_, i) => i !== index);
+        });
+    };
 
-            const next: FileProgress = {};
-            files.forEach((f) => { next[f.name] = "pending"; });
-            setProgress(next);
+    const handleDrop = useCallback(
+        (e: React.DragEvent) => {
+            e.preventDefault();
+            setDragOver(false);
+            addFiles(e.dataTransfer.files);
+        },
+        [addFiles],
+    );
 
-            for (let i = 0; i < initData.uploads.length; i++) {
-                const desc = initData.uploads[i];
-                const file = files[i];
-                const res = await fetch(desc.signedUploadUrl, {
-                    method: "PUT",
-                    headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "false" },
-                    body: file,
-                });
-                if (!res.ok) {
-                    setProgress((p) => ({ ...p, [file.name]: "failed" }));
-                    throw new Error(`Failed to upload ${file.name}.`);
-                }
-                setProgress((p) => ({ ...p, [file.name]: "uploaded" }));
+    const handleUpload = async () => {
+        if (files.length === 0 || uploading) return;
+        setUploading(true);
+
+        // Mark all as uploading
+        setFiles((prev) => prev.map((f) => ({ ...f, status: "uploading" as const })));
+
+        try {
+            // Build FormData with all files
+            const formData = new FormData();
+            for (const entry of files) {
+                formData.append("files", entry.file);
             }
 
-            const compRes = await fetch("/api/upload/complete", {
+            const res = await fetch("/api/upload", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ jobId: initData.jobId, objectPaths: initData.uploads.map((u) => u.objectPath) }),
+                body: formData,
             });
-            const compData = (await compRes.json()) as { status?: string; error?: string };
-            if (!compRes.ok || compData.status !== "queued") throw new Error(compData.error ?? "Failed to enqueue.");
 
-            setUploadState("done");
-            router.push(`/jobs/${initData.jobId}`);
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || `Upload failed (${res.status})`);
+            }
+
+            // Mark all as done
+            setFiles((prev) => prev.map((f) => ({ ...f, status: "done" as const })));
+
+            // Navigate home after short delay
+            setTimeout(() => router.push("/"), 1200);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Unexpected error.");
-            setUploadState("failed");
+            console.error("Upload error:", err);
+            setFiles((prev) =>
+                prev.map((f) =>
+                    f.status === "uploading"
+                        ? { ...f, status: "error" as const, error: String(err) }
+                        : f,
+                ),
+            );
+        } finally {
+            setUploading(false);
         }
-    }
+    };
 
-    const uploadedCount = Object.values(progress).filter((s) => s === "uploaded").length;
-    const totalCount = files.length;
+    const pendingCount = files.filter((f) => f.status === "pending").length;
 
     return (
         <div className="page-shell">
-            {/* ── Hero ── */}
-            <div style={{ marginBottom: "1.5rem", paddingTop: "0.5rem" }}>
-                <h1 style={{
-                    fontFamily: "var(--font-fraunces), Georgia, serif",
-                    fontSize: "clamp(1.6rem, 5vw, 2.2rem)",
-                    fontWeight: 700,
-                    letterSpacing: "-0.02em",
-                    lineHeight: 1.15,
-                    color: "var(--ink)",
-                    fontStyle: "italic",
-                }}>
-                    Group faces in<br />your photos
-                </h1>
-                <p style={{ color: "var(--muted)", marginTop: "0.4rem", fontSize: "0.92rem" }}>
-                    Upload up to {MAX_FILES} photos and our AI will cluster faces by person.
-                </p>
-            </div>
+            <h1 style={{
+                fontFamily: "var(--font-display)", fontStyle: "italic",
+                fontSize: "1.6rem", fontWeight: 700, marginBottom: "1.25rem",
+            }}>
+                Upload Photos
+            </h1>
 
-            {/* ── Drag &amp; Drop Zone ── */}
+            {/* Drop Zone */}
             <div
-                className={`drag-zone${dragOver ? " drag-over" : ""}`}
+                className={`panel press-scale${dragOver ? " drag-over" : ""}`}
+                style={{
+                    display: "flex", flexDirection: "column", alignItems: "center",
+                    justifyContent: "center", gap: "0.75rem", padding: "2.5rem 1.5rem",
+                    marginBottom: "1.25rem", cursor: "pointer",
+                    border: dragOver ? "2px dashed var(--accent)" : "1px solid var(--line)",
+                    background: dragOver ? "var(--accent-soft)" : "var(--bg-elevated)",
+                    transition: "all 200ms ease",
+                }}
                 onClick={() => inputRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
-                onDrop={onDrop}
-                role="button"
-                tabIndex={0}
-                aria-label="Upload photos"
-                onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+                onDrop={handleDrop}
             >
-                <input
-                    ref={inputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    style={{ display: "none" }}
-                    onChange={onInputChange}
-                    id="photo-upload-input"
-                />
-                <div className="drag-zone-icon"><Camera size={32} strokeWidth={1.5} /></div>
-                <p className="drag-zone-title">
-                    {dragOver ? "Drop photos here" : "Tap to select photos"}
+                <Upload size={32} strokeWidth={1.5} color="var(--accent)" />
+                <p style={{ fontWeight: 600, fontSize: "0.95rem" }}>
+                    Tap to select or drag photos here
                 </p>
-                <p className="drag-zone-sub">or drag &amp; drop · JPG, PNG, WEBP · up to {MAX_FILES} photos</p>
-                {files.length > 0 && (
-                    <span className="chip active" style={{ marginTop: "0.5rem" }}
-                        onClick={(e) => { e.stopPropagation(); }}>
-                        {files.length} photo{files.length !== 1 ? "s" : ""} · {fmt(totalBytes)}
-                    </span>
-                )}
+                <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
+                    JPEG, PNG, HEIC • Max 50 photos per batch
+                </p>
+                <input
+                    ref={inputRef} type="file" accept="image/*" multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => e.target.files && addFiles(e.target.files)}
+                />
             </div>
 
-            {/* ── Photo Previews ── */}
+            {/* Preview Grid */}
             {files.length > 0 && (
-                <div className="photo-preview-grid">
-                    {files.map((file) => {
-                        const state = progress[file.name];
-                        return (
-                            <div className="photo-preview-item" key={file.name}>
-                                {previews[file.name] && (
-                                    <img className="photo-preview-img" src={previews[file.name]} alt={file.name} />
-                                )}
-                                {state === "uploaded" && (
-                                    <div className="photo-preview-ring done">✓</div>
-                                )}
-                                {state === "failed" && (
-                                    <div className="photo-preview-ring failed">✕</div>
-                                )}
-                                {state === "pending" && (
-                                    <div className="photo-preview-ring">
-                                        <svg width="24" height="24" viewBox="0 0 24 24" style={{ animation: "spin 1s linear infinite" }}>
-                                            <circle cx="12" cy="12" r="9" fill="none" stroke="white" strokeWidth="2.5" strokeDasharray="40 20" strokeLinecap="round" />
-                                        </svg>
+                <>
+                    <div style={{
+                        display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+                        gap: "0.5rem", marginBottom: "1.25rem",
+                    }}>
+                        {files.map((entry, i) => (
+                            <div key={i} style={{
+                                position: "relative", aspectRatio: "1",
+                                borderRadius: "var(--r-sm)", overflow: "hidden",
+                                background: "var(--bg-subtle)",
+                            }}>
+                                <img src={entry.preview} alt={entry.file.name} style={{
+                                    width: "100%", height: "100%", objectFit: "cover",
+                                    opacity: entry.status === "done" ? 0.6 : 1,
+                                }} />
+                                {entry.status === "uploading" && (
+                                    <div style={{
+                                        position: "absolute", inset: 0, display: "flex",
+                                        alignItems: "center", justifyContent: "center",
+                                        background: "rgba(0,0,0,0.4)",
+                                    }}>
+                                        <Loader size={20} color="#fff" className="spin" />
                                     </div>
                                 )}
-                                {!state && !submitting && (
-                                    <button
-                                        className="photo-preview-remove"
-                                        onClick={() => removeFile(file.name)}
-                                        aria-label={`Remove ${file.name}`}
-                                        title="Remove"
-                                    >
-                                        ✕
+                                {entry.status === "done" && (
+                                    <div style={{
+                                        position: "absolute", inset: 0, display: "flex",
+                                        alignItems: "center", justifyContent: "center",
+                                        background: "rgba(0,0,0,0.3)",
+                                    }}>
+                                        <CheckCircle size={24} color="#4ade80" strokeWidth={2.5} />
+                                    </div>
+                                )}
+                                {entry.status === "error" && (
+                                    <div style={{
+                                        position: "absolute", inset: 0, display: "flex",
+                                        flexDirection: "column", alignItems: "center",
+                                        justifyContent: "center", background: "rgba(0,0,0,0.5)",
+                                        padding: "0.5rem",
+                                    }}>
+                                        <AlertTriangle size={20} color="#f87171" strokeWidth={2.5} />
+                                        <p style={{ color: "#f87171", fontSize: "0.65rem", marginTop: 4, textAlign: "center" }}>
+                                            {entry.error || "Failed"}
+                                        </p>
+                                    </div>
+                                )}
+                                {entry.status === "pending" && (
+                                    <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{
+                                        position: "absolute", top: 4, right: 4, width: 22, height: 22,
+                                        borderRadius: "50%", background: "rgba(0,0,0,0.6)", border: "none",
+                                        color: "#fff", display: "flex", alignItems: "center",
+                                        justifyContent: "center", cursor: "pointer", padding: 0, minHeight: "unset",
+                                    }}>
+                                        <X size={12} strokeWidth={3} />
                                     </button>
                                 )}
                             </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* ── Import From ── */}
-            {files.length === 0 && (
-                <>
-                    <div className="divider">or import from</div>
-                    <div className="import-grid">
-                        <button className="import-card" onClick={() => inputRef.current?.click()}>
-                            <span className="import-card-icon"><FolderOpen size={22} strokeWidth={1.8} /></span>
-                            Files
-                        </button>
-                        <button className="import-card" onClick={() => inputRef.current?.click()}>
-                            <span className="import-card-icon"><Camera size={22} strokeWidth={1.8} /></span>
-                            Camera
-                        </button>
-                        <button className="import-card" style={{ opacity: 0.5, cursor: "not-allowed" }}>
-                            <span className="import-card-icon"><Link2 size={22} strokeWidth={1.8} /></span>
-                            URL (soon)
-                        </button>
-                        <button className="import-card" style={{ opacity: 0.5, cursor: "not-allowed" }}>
-                            <span className="import-card-icon"><CloudUpload size={22} strokeWidth={1.8} /></span>
-                            Drive (soon)
-                        </button>
+                        ))}
                     </div>
+
+                    <button
+                        className="btn btn-primary"
+                        style={{ width: "100%", gap: "0.5rem" }}
+                        onClick={handleUpload}
+                        disabled={uploading || files.every((f) => f.status === "done")}
+                    >
+                        {uploading ? (
+                            <><Loader size={16} className="spin" /> Uploading…</>
+                        ) : files.every((f) => f.status === "done") ? (
+                            <><CheckCircle size={16} /> All uploaded! Redirecting…</>
+                        ) : (
+                            <><Upload size={16} /> Upload {pendingCount} {pendingCount === 1 ? "Photo" : "Photos"}</>
+                        )}
+                    </button>
                 </>
             )}
-
-            {/* ── Advanced Settings Accordion ── */}
-            <div className="accordion" style={{ marginTop: "1.25rem" }}>
-                <button
-                    className="accordion-trigger"
-                    onClick={() => setSettings((o) => !o)}
-                    aria-expanded={settingsOpen}
-                >
-                    <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><Settings size={16} strokeWidth={2} /> Advanced Settings</span>
-                    <span className={`accordion-chevron${settingsOpen ? " open" : ""}`}><ChevronDown size={16} strokeWidth={2.5} /></span>
-                </button>
-                <div className={`accordion-body${settingsOpen ? " open" : ""}`}>
-                    <div className="accordion-body-inner">
-                        <div className="grid-two">
-                            <div className="field">
-                                <label htmlFor="eps">DBSCAN EPS</label>
-                                <input id="eps" type="number" min="0.05" max="1" step="0.01" value={eps}
-                                    onChange={(e) => setEps(e.target.value)} />
-                                <span className="hint">Cluster radius (0.05–1)</span>
-                            </div>
-                            <div className="field">
-                                <label htmlFor="minSamples">Min Samples</label>
-                                <input id="minSamples" type="number" min="1" max="20" step="1" value={minSamples}
-                                    onChange={(e) => setMinSamples(e.target.value)} />
-                                <span className="hint">Min faces per cluster</span>
-                            </div>
-                        </div>
-                        <div className="field">
-                            <label htmlFor="minDetScore">Min Detection Score</label>
-                            <input id="minDetScore" type="number" min="0" max="1" step="0.01" value={minDetScore}
-                                onChange={(e) => setMinDetScore(e.target.value)} />
-                            <span className="hint">Skip faces below this confidence (0–1)</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* ── Error ── */}
-            {error && (
-                <div style={{
-                    marginTop: "0.85rem",
-                    padding: "0.65rem 0.9rem",
-                    background: "var(--error-soft)",
-                    borderRadius: "var(--r-sm)",
-                    color: "var(--error)",
-                    fontWeight: 600,
-                    fontSize: "0.88rem",
-                }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><AlertTriangle size={15} strokeWidth={2.5} /> {error}</span>
-                </div>
-            )}
-
-            {/* ── Upload Progress ── */}
-            {submitting && (
-                <div style={{ marginTop: "0.75rem", fontSize: "0.85rem", color: "var(--muted)", fontWeight: 600 }}>
-                    Uploading {uploadedCount} / {totalCount} photos…
-                </div>
-            )}
-
-            {/* ── Actions ── */}
-            <div style={{ display: "flex", gap: "0.65rem", marginTop: "1.25rem", flexWrap: "wrap" }}>
-                <button
-                    className="btn btn-primary"
-                    disabled={submitting || files.length === 0}
-                    onClick={startUpload}
-                    style={{ flex: 1, minWidth: 160 }}
-                >
-                    {submitting ? `Uploading… ${uploadedCount}/${totalCount}` : <><Rocket size={16} strokeWidth={2} /> Start Grouping</>}
-                </button>
-                {files.length > 0 && (
-                    <button
-                        className="btn btn-secondary"
-                        disabled={submitting}
-                        onClick={() => { setFiles([]); setPreviews({}); setProgress({}); setError(null); setUploadState("idle"); }}
-                    >
-                        Clear
-                    </button>
-                )}
-            </div>
-
-            <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
         </div>
     );
 }

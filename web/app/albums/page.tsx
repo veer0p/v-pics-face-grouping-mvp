@@ -1,73 +1,134 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Star, Lightbulb, Image } from "lucide-react";
+import { Plus, Image, Loader, RefreshCw, FolderPlus } from "lucide-react";
 
-const PLACEHOLDER_ALBUMS = [
-    { name: "Trip to Goa", count: 48, color: "linear-gradient(135deg, #FF6B6B, #FF9A3C)" },
-    { name: "Birthday 2024", count: 23, color: "linear-gradient(135deg, #FFD93D, #FF6B6B)" },
-    { name: "Family", count: 120, color: "linear-gradient(135deg, #5B4EFF, #9D93FF)" },
-    { name: "Work", count: 15, color: "linear-gradient(135deg, #10B981, #60C8FF)" },
-];
+type Album = {
+    id: string;
+    name: string;
+    count: number;
+    coverUrl: string | null;
+    createdAt: string;
+};
 
 export default function AlbumsPage() {
     const router = useRouter();
+    const [albums, setAlbums] = useState<Album[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [creating, setCreating] = useState(false);
+
+    const fetchAlbums = async () => {
+        setLoading(true);
+        try {
+            const res = await fetch("/api/albums");
+            const data = await res.json();
+            setAlbums(data.albums || []);
+        } catch (err) {
+            console.error("Fetch albums error:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => { fetchAlbums(); }, []);
+
+    const handleCreateAlbum = async () => {
+        const name = prompt("Enter album name:");
+        if (!name?.trim()) return;
+
+        setCreating(true);
+        try {
+            const res = await fetch("/api/albums", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: name.trim() }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                router.push(`/albums/${data.album.id}`);
+            }
+        } catch (err) {
+            console.error("Create album error:", err);
+        } finally {
+            setCreating(false);
+        }
+    };
 
     return (
         <div className="page-shell">
-            <div style={{ marginBottom: "1.5rem" }}>
-                <h1 style={{
-                    fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontSize: "clamp(1.6rem, 5vw, 2.1rem)", fontWeight: 700,
-                    letterSpacing: "-0.02em", lineHeight: 1.15,
-                }}>
-                    Albums
-                </h1>
-                <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "0.3rem" }}>
-                    Browse and organise your photo collections
-                </p>
-            </div>
-
-            {/* Favorites row */}
-            <div style={{ marginBottom: "1.75rem" }}>
-                <p className="section-heading" style={{ display: "flex", alignItems: "center", gap: "0.35rem", marginBottom: "0.65rem" }}>
-                    <Star size={14} strokeWidth={2.5} color="var(--accent)" /> Favourites
-                </p>
-                <div style={{
-                    display: "flex", gap: "0.65rem", overflowX: "auto", paddingBottom: "0.5rem",
-                    msOverflowStyle: "none", scrollbarWidth: "none"
-                }}>
-                    {PLACEHOLDER_ALBUMS.slice(0, 3).map((a) => (
-                        <div key={a.name} style={{ flexShrink: 0, width: 130 }}>
-                            <div style={{
-                                width: 130, height: 130, borderRadius: "var(--r-md)",
-                                background: a.color,
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                cursor: "pointer", border: "1px solid var(--line)",
-                                transition: "transform 140ms ease",
-                            }}>
-                                <Image size={28} strokeWidth={1.5} color="rgba(255,255,255,0.7)" />
-                            </div>
-                            <p style={{
-                                fontSize: "0.82rem", fontWeight: 700, marginTop: "0.4rem",
-                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
-                            }}>
-                                {a.name}
-                            </p>
-                            <p style={{ fontSize: "0.72rem", color: "var(--muted)" }}>{a.count} photos</p>
-                        </div>
-                    ))}
+            <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                marginBottom: "1.25rem",
+            }}>
+                <div>
+                    <h1 style={{
+                        fontFamily: "var(--font-display)", fontStyle: "italic",
+                        fontSize: "1.75rem", fontWeight: 700,
+                    }}>
+                        Albums
+                    </h1>
+                    <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: "0.15rem" }}>
+                        Manage your collections
+                    </p>
                 </div>
+                <button className="app-header-btn" onClick={fetchAlbums} disabled={loading}>
+                    <RefreshCw size={18} className={loading && !creating ? "spin" : ""} />
+                </button>
             </div>
 
-            {/* Albums grid */}
-            <div style={{ marginBottom: "1.25rem" }}>
-                <p className="section-heading" style={{ marginBottom: "0.65rem" }}>Your Albums</p>
+            {loading && albums.length === 0 && (
+                <div style={{ display: "flex", justifyContent: "center", padding: "4rem 0" }}>
+                    <Loader size={28} className="spin" color="var(--accent)" />
+                </div>
+            )}
+
+            {!loading && albums.length === 0 && (
+                <div className="empty-state" style={{ minHeight: 300 }}>
+                    <div style={{
+                        width: 64, height: 64, borderRadius: "var(--r-lg)",
+                        background: "var(--bg-subtle)", display: "flex",
+                        alignItems: "center", justifyContent: "center", marginBottom: "0.5rem",
+                    }}>
+                        <FolderPlus size={28} color="var(--muted)" strokeWidth={1.5} />
+                    </div>
+                    <p className="empty-state-title">No albums yet</p>
+                    <p className="empty-state-sub">Create an album to organize your photos.</p>
+                    <button className="btn btn-primary" onClick={handleCreateAlbum}
+                        disabled={creating} style={{ marginTop: "1rem", gap: "0.4rem" }}>
+                        {creating ? <Loader size={16} className="spin" /> : <Plus size={16} />}
+                        New Album
+                    </button>
+                </div>
+            )}
+
+            {albums.length > 0 && (
                 <div className="albums-grid">
-                    {PLACEHOLDER_ALBUMS.map((album) => (
-                        <div className="album-card" key={album.name}>
-                            <div className="album-cover-placeholder" style={{ background: album.color }}>
-                                <Image size={24} strokeWidth={1.5} color="rgba(255,255,255,0.6)" />
+                    {/* Create New Card */}
+                    <div className="album-card" onClick={handleCreateAlbum} style={{ cursor: "pointer" }}>
+                        <div className="album-cover-placeholder"
+                            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                            {creating ? <Loader size={24} className="spin" /> : <Plus size={24} strokeWidth={2.5} />}
+                        </div>
+                        <div className="album-info">
+                            <p className="album-name" style={{ color: "var(--accent)" }}>New Album</p>
+                            <p className="album-count">Create a collection</p>
+                        </div>
+                    </div>
+
+                    {/* Real Albums */}
+                    {albums.map((album) => (
+                        <div className="album-card" key={album.id}
+                            onClick={() => router.push(`/albums/${album.id}`)}>
+                            <div className="album-cover-placeholder" style={{ background: "var(--bg-subtle)", position: "relative" }}>
+                                {album.coverUrl ? (
+                                    <img src={album.coverUrl} alt={album.name} style={{
+                                        width: "100%", height: "100%", objectFit: "cover",
+                                    }} />
+                                ) : (
+                                    <Image size={24} strokeWidth={1.5} color="var(--muted)" />
+                                )}
                             </div>
                             <div className="album-info">
                                 <p className="album-name">{album.name}</p>
@@ -75,37 +136,8 @@ export default function AlbumsPage() {
                             </div>
                         </div>
                     ))}
-
-                    <div className="album-card" style={{ cursor: "pointer" }}>
-                        <div className="album-cover-placeholder"
-                            style={{ background: "var(--accent-soft)", color: "var(--accent)", flexDirection: "column", gap: "0.25rem" }}>
-                            <Plus size={24} strokeWidth={2} color="var(--accent)" />
-                        </div>
-                        <div className="album-info">
-                            <p className="album-name" style={{ color: "var(--accent)" }}>New Album</p>
-                            <p className="album-count">Create collection</p>
-                        </div>
-                    </div>
                 </div>
-            </div>
-
-            <div style={{
-                display: "flex", gap: "0.65rem", padding: "0.85rem 1rem",
-                background: "var(--accent-soft)", borderRadius: "var(--r-md)",
-                border: "1px solid rgba(91,78,255,0.18)",
-            }}>
-                <Lightbulb size={18} strokeWidth={1.8} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
-                <p style={{ fontSize: "0.82rem", color: "var(--ink-2)", lineHeight: 1.55 }}>
-                    Albums are coming soon! For now, run face grouping from the
-                    {" "}<button className="btn-ghost btn-sm" onClick={() => router.push("/upload")}
-                        style={{
-                            display: "inline", padding: "0 0.25rem", fontWeight: 700, border: "none",
-                            background: "none", color: "var(--accent)", cursor: "pointer", fontSize: "0.82rem"
-                        }}>
-                        Upload tab
-                    </button> to see your grouped faces.
-                </p>
-            </div>
+            )}
         </div>
     );
 }
