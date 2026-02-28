@@ -22,7 +22,13 @@ export async function GET(req: NextRequest) {
 
         const uploadUrl = await getUploadUrl(originalKey, contentType, 3600); // 1 hour for large files
 
-        console.log(`[UPLOAD] Presign Created for ${filename}. Key: ${originalKey}`);
+        // ── Detailed debug logging ──
+        const parsedUrl = new URL(uploadUrl);
+        console.log(`[UPLOAD] Presign Created for ${filename}`);
+        console.log(`[UPLOAD]   Key: ${originalKey}`);
+        console.log(`[UPLOAD]   URL Host: ${parsedUrl.hostname}`);
+        console.log(`[UPLOAD]   URL Path: ${parsedUrl.pathname}`);
+        console.log(`[UPLOAD]   Full URL (first 200 chars): ${uploadUrl.substring(0, 200)}...`);
 
         return NextResponse.json({
             fileId,

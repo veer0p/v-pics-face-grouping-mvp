@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
     Upload, Image, Loader, RefreshCw, Trash2, X, CheckCircle, Heart, FolderPlus, Plus,
 } from "lucide-react";
+import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
 
 type Photo = {
     id: string;
@@ -37,6 +38,9 @@ export default function HomePage() {
     const observerRef = useRef<HTMLDivElement>(null);
 
     const selectMode = selected.size > 0;
+
+    // Realtime subscription — new photos from other devices appear instantly
+    useRealtimePhotos({ photos, setPhotos, enabled: !loading });
 
     const fetchPhotos = useCallback(async (offset = 0, append = false) => {
         if (offset === 0) setLoading(true);

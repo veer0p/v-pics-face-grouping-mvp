@@ -113,19 +113,25 @@ export async function uploadToB2(
 
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
-                onProgress(Math.round((e.loaded / e.total) * 100));
+                const pct = Math.round((e.loaded / e.total) * 100);
+                console.log(`[B2-UPLOAD]   Progress: ${pct}% (${(e.loaded / 1024 / 1024).toFixed(2)}/${(e.total / 1024 / 1024).toFixed(2)} MB)`);
+                onProgress(pct);
             }
         };
 
         xhr.onload = () => {
+            console.log(`[B2-UPLOAD] ✅ onload fired. Status: ${xhr.status} ${xhr.statusText}`);
+            console.log(`[B2-UPLOAD]   Response Headers: ${xhr.getAllResponseHeaders()}`);
+            console.log(`[B2-UPLOAD]   Response Body (first 500 chars): ${xhr.responseText?.substring(0, 500)}`);
             if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error(`B2 Upload Failed: ${xhr.status} ${xhr.statusText}`));
+            else reject(new Error(`B2 Upload Failed: ${xhr.status} ${xhr.statusText}. Body: ${xhr.responseText?.substring(0, 200)}`));
         };
 
         xhr.onerror = () => {
             console.error("B2 Transport Error (Check CORS):", xhr);
             reject(new Error("B2 Network Error (Usually CORS)"));
         };
+
         xhr.send(file);
     });
 }
@@ -136,7 +142,10 @@ export async function uploadToB2(
 export async function testB2Connectivity(): Promise<{ ok: boolean; error?: string }> {
     try {
         const res = await fetch("/api/upload/presign?filename=test-connection.txt&type=text/plain");
-        if (!res.ok) return { ok: false, error: "Server failed to generate test URL" };
+        if (!res.ok) {
+            console.error(`[B2-TEST] Presign request failed: ${res.status} ${res.statusText}`);
+            return { ok: false, error: "Server failed to generate test URL" };
+        }
         const { uploadUrl } = await res.json();
 
         return new Promise((resolve) => {
@@ -145,15 +154,18 @@ export async function testB2Connectivity(): Promise<{ ok: boolean; error?: strin
             xhr.setRequestHeader("Content-Type", "text/plain");
             xhr.onload = () => {
                 if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true });
-                else resolve({ ok: false, error: `B2 Rejected (Status: ${xhr.status}). Check Bucket Name/Key.` });
+                else resolve({ ok: false, error: `B2 Rejected (Status: ${xhr.status}). Response: ${xhr.responseText?.substring(0, 200)}` });
             };
             xhr.onerror = () => {
                 // If status is 0, it's almost always CORS or local network blocking
                 resolve({ ok: false, error: `Network/CORS Error (Status: 0). Shields or Firewall Blocking?` });
             };
+
             xhr.send("test-connection");
         });
     } catch (err: any) {
+        console.error(`[B2-TEST] Exception:`, err);
         return { ok: false, error: err.message };
     }
 }
+
