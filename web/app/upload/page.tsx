@@ -8,7 +8,7 @@ import {
     RefreshCw, SkipForward
 } from "lucide-react";
 import * as fflate from "fflate";
-import { extractBrowserExif, uploadToB2, calculateHash, testB2Connectivity } from "@/lib/upload-utils";
+import { extractBrowserExif, uploadToB2, calculateHash, testB2Connectivity, generateThumbnail } from "@/lib/upload-utils";
 
 type FileEntry = {
     id: string;
@@ -143,13 +143,29 @@ export default function UploadPage() {
                 updateStatus(entry.id, "processing", 30);
                 const preRes = await fetch(`/api/upload/presign?filename=${encodeURIComponent(entry.name)}&type=${entry.file.type}`);
                 if (!preRes.ok) throw new Error(`Presign API Error: ${preRes.status}`);
-                const { originalKey, thumbKey, uploadUrl, fileId } = await preRes.json();
+                const { originalKey, thumbKey, uploadUrl, thumbUploadUrl, fileId } = await preRes.json();
 
-                // 3. Direct Upload to B2
+                // 3. Direct Upload to B2 (Original + Thumbnail)
                 updateStatus(entry.id, "uploading", 30);
-                await uploadToB2(entry.file, uploadUrl, (p) => {
-                    updateStatus(entry.id, "uploading", 30 + (p * 0.6));
-                }).catch(err => {
+
+                // Original
+                const uploadPromise = uploadToB2(entry.file, uploadUrl, (p) => {
+                    updateStatus(entry.id, "uploading", 30 + (p * 0.5));
+                });
+
+                // Thumbnail (Parallel generation and upload)
+                const thumbPromise = (async () => {
+                    try {
+                        const thumbBlob = await generateThumbnail(entry.file);
+                        const thumbFile = new File([thumbBlob], `thumb_${entry.name}`, { type: "image/webp" });
+                        await uploadToB2(thumbFile, thumbUploadUrl, () => { });
+                    } catch (err) {
+                        console.warn("Thumbnail upload failed:", err);
+                        // We don't fail the whole upload if just the thumbnail fails
+                    }
+                })();
+
+                await Promise.all([uploadPromise, thumbPromise]).catch(err => {
                     throw new Error(`B2 Upload Failure (CORS or Network): ${err.message}`);
                 });
 

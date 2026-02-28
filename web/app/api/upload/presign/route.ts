@@ -14,27 +14,26 @@ export async function GET(req: NextRequest) {
 
         console.log(`[UPLOAD] Requesting Presign URL: ${filename} (${contentType})`);
 
-        // Generate unique keys for original and thumbnail placeholders
+        // Generate unique keys for original and thumbnail
         const fileId = uuidv4();
         const ext = filename.split(".").pop() || "jpg";
-        const originalKey = `photos/${fileId}/${filename}`;
-        const thumbKey = `photos/${fileId}/thumb_${filename}`;
+        const originalKey = `photos/${fileId}.${ext}`;
+        const thumbKey = `thumbs/${fileId}.webp`;
 
         const uploadUrl = await getUploadUrl(originalKey, contentType, 3600); // 1 hour for large files
+        const thumbUploadUrl = await getUploadUrl(thumbKey, "image/webp", 3600);
 
         // ── Detailed debug logging ──
-        const parsedUrl = new URL(uploadUrl);
         console.log(`[UPLOAD] Presign Created for ${filename}`);
-        console.log(`[UPLOAD]   Key: ${originalKey}`);
-        console.log(`[UPLOAD]   URL Host: ${parsedUrl.hostname}`);
-        console.log(`[UPLOAD]   URL Path: ${parsedUrl.pathname}`);
-        console.log(`[UPLOAD]   Full URL (first 200 chars): ${uploadUrl.substring(0, 200)}...`);
+        console.log(`[UPLOAD]   Orig Key: ${originalKey}`);
+        console.log(`[UPLOAD]   Thumb Key: ${thumbKey}`);
 
         return NextResponse.json({
             fileId,
             originalKey,
             thumbKey,
             uploadUrl,
+            thumbUploadUrl,
         });
     } catch (err) {
         console.error("Presign error:", err);

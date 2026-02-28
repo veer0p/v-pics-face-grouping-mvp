@@ -99,6 +99,52 @@ export async function extractBrowserExif(file: File): Promise<{
 }
 
 /**
+ * Generate a thumbnail for an image file using HTML5 Canvas.
+ * Resizes to THUMB_MAX while maintaining aspect ratio.
+ */
+export async function generateThumbnail(file: File, maxDim = 400): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement("canvas");
+                let { width, height } = img;
+
+                if (width > height) {
+                    if (width > maxDim) {
+                        height *= maxDim / width;
+                        width = maxDim;
+                    }
+                } else {
+                    if (height > maxDim) {
+                        width *= maxDim / height;
+                        height = maxDim;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) return reject(new Error("Failed to get canvas context"));
+
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // Try to export as webp, fallback to jpeg
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error("Canvas toBlob failed"));
+                }, "image/webp", 0.8);
+            };
+            img.onerror = () => reject(new Error("Failed to load image for thumbnail"));
+            img.src = e.target?.result as string;
+        };
+        reader.onerror = () => reject(new Error("Failed to read file for thumbnail"));
+        reader.readAsDataURL(file);
+    });
+}
+
+/**
  * Upload a file directly to B2 using a presigned URL with progress tracking.
  */
 export async function uploadToB2(
