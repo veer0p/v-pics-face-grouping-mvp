@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
             .from("photos")
             .select("id, original_key, thumb_key, original_name, mime_type, size_bytes, width, height, thumb_width, thumb_height, is_liked, taken_at, created_at", { count: "exact" })
             .eq("is_deleted", false)
-            .order("taken_at", { ascending: false, nullsFirst: false })
+            .order("taken_at", { ascending: false, nullsFirst: true })
             .order("created_at", { ascending: false })
             .range(offset, offset + limit - 1);
 

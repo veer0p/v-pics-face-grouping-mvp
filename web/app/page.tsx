@@ -165,10 +165,19 @@ export default function HomePage() {
         return filter === "favorites" ? photos.filter((p) => p.isLiked) : photos;
     }, [photos, filter]);
 
+    // Chronological Sort (Perfect interleaving)
+    const sortedPhotos = useMemo(() => {
+        return [...filteredPhotos].sort((a, b) => {
+            const dateA = new Date(a.takenAt || a.createdAt).getTime();
+            const dateB = new Date(b.takenAt || b.createdAt).getTime();
+            return dateB - dateA; // Latest first
+        });
+    }, [filteredPhotos]);
+
     // Grouping Logic
     const groupedPhotos = useMemo(() => {
         const groups: { title: string; photos: Photo[] }[] = [];
-        filteredPhotos.forEach((photo) => {
+        sortedPhotos.forEach((photo) => {
             const date = new Date(photo.takenAt || photo.createdAt);
             const title = formatDateHeader(date);
             const lastGroup = groups[groups.length - 1];
@@ -179,7 +188,7 @@ export default function HomePage() {
             }
         });
         return groups;
-    }, [filteredPhotos]);
+    }, [sortedPhotos]);
 
     function formatDateHeader(date: Date) {
         const now = new Date();

@@ -135,7 +135,7 @@ export default function UploadPage() {
                 // Hashing for large files is now memory-safe (Quick Fingerprint)
                 updateStatus(entry.id, "processing", 10);
                 const [hash, exif] = await Promise.all([
-                    calculateHash(entry.file).catch(() => "hash_err"),
+                    calculateHash(entry.file).catch(() => null),
                     extractBrowserExif(entry.file).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 }))
                 ]);
 
@@ -165,7 +165,13 @@ export default function UploadPage() {
                     }
                 })();
 
-                await Promise.all([uploadPromise, thumbPromise]).catch(err => {
+                await Promise.all([uploadPromise, thumbPromise]).catch(async err => {
+                    // Cleanup if one of them failed (original might have succeeded)
+                    await fetch("/api/upload/cleanup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ originalKey, thumbKey }),
+                    }).catch(() => { }); // Ignore cleanup errors
                     throw new Error(`B2 Upload Failure (CORS or Network): ${err.message}`);
                 });
 
@@ -197,6 +203,13 @@ export default function UploadPage() {
                         setStats(s => ({ ...s, duplicates: s.duplicates + 1 }));
                         return;
                     }
+                    // Rollback B2 if DB insertion failed (safety measure, though server also does this)
+                    await fetch("/api/upload/cleanup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ originalKey, thumbKey }),
+                    }).catch(() => { });
+
                     throw new Error(`DB Completion Error: ${compData.error || compRes.status}`);
                 }
 

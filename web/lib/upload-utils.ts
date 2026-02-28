@@ -20,35 +20,45 @@ export type FileMetadata = {
  * For large files (>50MB), we use a "Quick Fingerprint" (Size + First 1MB + Last 1MB) 
  * to prevent browser memory exhaustion and crashes.
  */
-export async function calculateHash(file: File): Promise<string> {
+export async function calculateHash(file: File): Promise<string | null> {
     const SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
     const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
-    if (file.size <= SIZE_LIMIT) {
-        // Full SHA-256 for small files
-        const arrayBuffer = await file.arrayBuffer();
-        const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-    } else {
-        // Quick Fingerprint for large files: [Size]-[FirstMBHash]-[LastMBHash]
-        const firstChunk = file.slice(0, CHUNK_SIZE);
-        const lastChunk = file.slice(file.size - CHUNK_SIZE);
+    try {
+        if (!window.crypto?.subtle) {
+            console.warn("[HASH] crypto.subtle is unavailable (insecure context?). Skipping hash.");
+            return null;
+        }
 
-        const [firstBuffer, lastBuffer] = await Promise.all([
-            firstChunk.arrayBuffer(),
-            lastChunk.arrayBuffer()
-        ]);
+        if (file.size <= SIZE_LIMIT) {
+            // Full SHA-256 for small files
+            const arrayBuffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+        } else {
+            // Quick Fingerprint for large files: [Size]-[FirstMBHash]-[LastMBHash]
+            const firstChunk = file.slice(0, CHUNK_SIZE);
+            const lastChunk = file.slice(file.size - CHUNK_SIZE);
 
-        const [firstHash, lastHash] = await Promise.all([
-            crypto.subtle.digest("SHA-256", firstBuffer),
-            crypto.subtle.digest("SHA-256", lastBuffer)
-        ]);
+            const [firstBuffer, lastBuffer] = await Promise.all([
+                firstChunk.arrayBuffer(),
+                lastChunk.arrayBuffer()
+            ]);
 
-        const toHex = (buf: ArrayBuffer) =>
-            Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+            const [firstHash, lastHash] = await Promise.all([
+                crypto.subtle.digest("SHA-256", firstBuffer),
+                crypto.subtle.digest("SHA-256", lastBuffer)
+            ]);
 
-        return `q_${file.size}_${toHex(firstHash).substring(0, 16)}_${toHex(lastHash).substring(0, 16)}`;
+            const toHex = (buf: ArrayBuffer) =>
+                Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+
+            return `q_${file.size}_${toHex(firstHash).substring(0, 16)}_${toHex(lastHash).substring(0, 16)}`;
+        }
+    } catch (err) {
+        console.error("[HASH] Error calculating hash:", err);
+        return null;
     }
 }
 
@@ -64,6 +74,7 @@ export async function extractBrowserExif(file: File): Promise<{
     try {
         const raw = await exifr.parse(file, {
             translateKeys: true,
+            translateValues: false, // Ensure raw values (like orientation integers)
         });
 
         if (!raw) return { metadata: {}, takenAt: null };
@@ -82,7 +93,7 @@ export async function extractBrowserExif(file: File): Promise<{
             shutter_speed: raw.ExposureTime ? `1/${Math.round(1 / raw.ExposureTime)}` : undefined,
             gps_lat: raw.latitude,
             gps_lng: raw.longitude,
-            orientation: raw.Orientation,
+            orientation: typeof raw.Orientation === 'number' ? raw.Orientation : undefined,
             exif_raw: raw,
         };
 

@@ -1,18 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
+import { deleteObject } from "@/lib/b2";
 
 /**
  * POST /api/upload/complete
  * Records a successful upload in the database with client-extracted metadata.
+ * Ensures atomicity by cleaning up B2 objects if DB insertion fails.
  */
 export async function POST(req: NextRequest) {
+    let original_key: string | undefined;
+    let thumb_key: string | undefined;
+
     try {
         const body = await req.json();
+        original_key = body.original_key;
+        thumb_key = body.thumb_key;
+
         console.log(`[UPLOAD] Completing upload for: ${body.original_name} (${body.size_bytes} bytes). Hash: ${body.content_hash?.substring(0, 8)}...`);
+
         const {
             id,
-            original_key,
-            thumb_key,
             original_name,
             mime_type,
             size_bytes,
@@ -53,7 +60,7 @@ export async function POST(req: NextRequest) {
                 shutter_speed: metadata?.shutter_speed,
                 gps_lat: metadata?.gps_lat,
                 gps_lng: metadata?.gps_lng,
-                orientation: metadata?.orientation,
+                orientation: typeof metadata?.orientation === 'number' ? metadata.orientation : null,
                 exif_raw: metadata?.exif_raw,
             })
             .select()
@@ -61,6 +68,16 @@ export async function POST(req: NextRequest) {
 
         if (error) {
             console.error("DB Insert Error:", error);
+
+            // Cleanup B2 objects on failure
+            if (original_key || thumb_key) {
+                console.log(`[UPLOAD-ROLLBACK] Cleaning up B2 for ${original_name}...`);
+                const deletions: Promise<void>[] = [];
+                if (original_key) deletions.push(deleteObject(original_key));
+                if (thumb_key) deletions.push(deleteObject(thumb_key));
+                await Promise.allSettled(deletions);
+            }
+
             // Handle duplicate hash error (Postgres error code 23505)
             if (error.code === "23505") {
                 return NextResponse.json({ error: "Duplicate photo detected (content hash already exists)." }, { status: 409 });
@@ -71,6 +88,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ photo: data });
     } catch (err) {
         console.error("Completion error:", err);
+
+        // Attempt emergency cleanup if we have keys
+        if (original_key || thumb_key) {
+            const deletions: Promise<void>[] = [];
+            if (original_key) deletions.push(deleteObject(original_key));
+            if (thumb_key) deletions.push(deleteObject(thumb_key));
+            await Promise.allSettled(deletions);
+        }
+
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 }

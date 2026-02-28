@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function mustEnv(name: string): string {
@@ -56,4 +56,15 @@ export async function getReadUrl(
         Key: key,
     });
     return getSignedUrl(getClient(), command, { expiresIn });
+}
+
+/**
+ * Delete an object from B2.
+ */
+export async function deleteObject(key: string): Promise<void> {
+    const command = new DeleteObjectCommand({
+        Bucket: getBucket(),
+        Key: key,
+    });
+    await getClient().send(command);
 }
