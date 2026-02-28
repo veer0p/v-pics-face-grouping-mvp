@@ -1,0 +1,15 @@
+{
+    "version": 2,
+    "buildCommand": "npm run build -w web",
+    "installCommand": "npm install",
+    "outputDirectory": "web/.next",
+    "framework": "nextjs",
+    "functions": {
+        "web/app/api/upload/route.ts": {
+            "maxDuration": 60
+        },
+        "web/app/api/photos/delete/route.ts": {
+            "maxDuration": 30
+        }
+    }
+}

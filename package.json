@@ -1,0 +1,13 @@
+{
+    "name": "v-pics-face-grouping-mvp",
+    "version": "1.0.0",
+    "private": true,
+    "workspaces": [
+        "web"
+    ],
+    "scripts": {
+        "web:dev": "npm run dev -w web",
+        "web:build": "npm run build -w web",
+        "web:start": "npm run start -w web"
+    }
+}
