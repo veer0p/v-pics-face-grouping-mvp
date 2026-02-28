@@ -80,66 +80,65 @@ export default function TrashPage() {
 
     return (
         <div className="page-shell">
-            <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", marginBottom: "1rem" }}>
-                <button className="btn btn-icon btn-secondary" onClick={() => router.back()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2.5rem" }}>
+                <button className="btn btn-icon btn-secondary mobile-only" onClick={() => router.back()}>
                     <ArrowLeft size={18} />
                 </button>
                 <h1 style={{
                     fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontSize: "1.5rem", fontWeight: 700,
+                    fontSize: "clamp(1.5rem, 5vw, 2rem)", fontWeight: 700,
                 }}>
                     Trash
                 </h1>
-                <span style={{ fontSize: "0.8rem", color: "var(--muted)", marginLeft: "auto" }}>
+                <span style={{ fontSize: "0.95rem", color: "var(--muted)", marginLeft: "auto" }}>
                     {photos.length} items
                 </span>
             </div>
 
             {loading && (
-                <div className="empty-state" style={{ minHeight: 200 }}>
-                    <Loader size={24} className="spin" color="var(--accent)" />
+                <div className="empty-state" style={{ minHeight: 300 }}>
+                    <Loader size={32} className="spin" color="var(--accent)" />
                 </div>
             )}
 
             {!loading && photos.length === 0 && (
-                <div className="empty-state" style={{ minHeight: 250 }}>
+                <div className="empty-state" style={{ minHeight: 350 }}>
                     <div style={{
-                        width: 56, height: 56, borderRadius: "var(--r-lg)",
+                        width: 64, height: 64, borderRadius: "var(--r-lg)",
                         background: "var(--bg-subtle)", display: "flex",
-                        alignItems: "center", justifyContent: "center", marginBottom: "0.5rem",
+                        alignItems: "center", justifyContent: "center", marginBottom: "0.75rem",
                     }}>
-                        <Trash2 size={24} color="var(--muted)" strokeWidth={1.5} />
+                        <Trash2 size={32} color="var(--muted)" strokeWidth={1.5} />
                     </div>
-                    <p className="empty-state-title">Trash is empty</p>
+                    <p className="empty-state-title" style={{ fontSize: '1.25rem' }}>Trash is empty</p>
                     <p className="empty-state-sub">Deleted photos will appear here.</p>
                 </div>
             )}
 
             {photos.length > 0 && (
-                <div style={{
-                    display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: "3px", borderRadius: "var(--r-sm)", overflow: "hidden",
-                }}>
+                <div className="responsive-grid" style={{ gap: "8px" }}>
                     {photos.map((photo) => {
                         const isSel = selected.has(photo.id);
                         return (
                             <div key={photo.id} style={{
                                 position: "relative", aspectRatio: "1", background: "var(--bg-subtle)",
-                                cursor: "pointer", opacity: 0.7,
+                                cursor: "pointer", borderRadius: 'var(--r-sm)', overflow: 'hidden'
                             }}
                                 onClick={() => toggleSelect(photo.id)}
                             >
                                 <img src={photo.thumbUrl} alt={photo.filename} loading="lazy" style={{
                                     width: "100%", height: "100%", objectFit: "cover", display: "block",
-                                    opacity: isSel ? 0.5 : 1,
+                                    opacity: isSel ? 0.4 : 0.8,
+                                    transition: 'opacity 0.2s'
                                 }} />
                                 {isSel && (
                                     <div style={{
-                                        position: "absolute", top: 6, right: 6, width: 24, height: 24,
+                                        position: "absolute", top: 10, right: 10, width: 32, height: 32,
                                         borderRadius: "50%", background: "var(--accent)",
                                         display: "flex", alignItems: "center", justifyContent: "center",
+                                        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
                                     }}>
-                                        <CheckCircle size={14} color="#fff" strokeWidth={3} />
+                                        <CheckCircle size={20} color="#fff" strokeWidth={3} />
                                     </div>
                                 )}
                             </div>
@@ -150,22 +149,30 @@ export default function TrashPage() {
 
             {selectMode && (
                 <div style={{
-                    position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom))",
-                    left: 12, right: 12, zIndex: 60,
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "0.65rem 1rem", borderRadius: "var(--r-lg)",
+                    position: "fixed", bottom: "clamp(20px, 5vh, 40px)",
+                    left: "50%", transform: "translateX(-50%)",
+                    width: 'auto', minWidth: '320px',
+                    zIndex: 100,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    gap: '1rem',
+                    padding: "1rem 1.5rem", borderRadius: "var(--r-pill)",
                     background: "var(--bg-elevated)", border: "1px solid var(--line)",
-                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                    boxShadow: "0 10px 40px rgba(0,0,0,0.3)",
+                    backdropFilter: 'blur(10px)'
                 }}>
-                    <button className="btn btn-sm" style={{
-                        gap: "0.3rem", background: "var(--accent)", color: "#fff", border: "none", fontWeight: 700,
+                    <button className="btn" style={{
+                        padding: '0.75rem 1.5rem',
+                        gap: "0.5rem", background: "var(--accent)", color: "#fff", border: "none", fontWeight: 700,
+                        borderRadius: 'var(--r-pill)'
                     }} onClick={handleRestore} disabled={acting}>
-                        <RotateCcw size={14} /> Restore {selected.size}
+                        <RotateCcw size={18} /> Restore {selected.size}
                     </button>
-                    <button className="btn btn-sm" style={{
-                        gap: "0.3rem", background: "var(--error)", color: "#fff", border: "none", fontWeight: 700,
+                    <button className="btn" style={{
+                        padding: '0.75rem 1.5rem',
+                        gap: "0.5rem", background: "var(--error)", color: "#fff", border: "none", fontWeight: 700,
+                        borderRadius: 'var(--r-pill)'
                     }} onClick={handlePermanentDelete} disabled={acting}>
-                        <Trash2 size={14} /> Delete Forever
+                        <Trash2 size={18} /> Delete Forever
                     </button>
                 </div>
             )}

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Search, Settings } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
+import { Sidebar } from "@/components/Sidebar";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatrixBackground } from "@/components/MatrixBackground";
 
@@ -26,10 +27,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }, []);
 
     const hideHeader = pathname.startsWith("/photo/") || pathname.startsWith("/edit/") || pathname === "/welcome";
+    const showSidebar = !hideHeader;
 
     return (
         <div className="app-shell">
             <MatrixBackground />
+
+            {showSidebar && <Sidebar />}
+
             {!hideHeader && (
                 <header
                     className={`app-header${hidden ? " header-hidden" : ""}${scrolled ? " header-scrolled" : ""}`}
@@ -70,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </header>
             )}
 
-            <main className={`page-content${hideHeader ? " no-header" : ""}`}>
+            <main className={`page-content${hideHeader ? " no-header" : ""}${showSidebar ? " with-sidebar" : ""}`}>
                 {children}
             </main>
 

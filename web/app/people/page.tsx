@@ -8,16 +8,16 @@ export default function PeoplePage() {
 
     return (
         <div className="page-shell">
-            <div style={{ marginBottom: "1.5rem" }}>
+            <div style={{ marginBottom: "2.5rem" }}>
                 <h1 style={{
                     fontFamily: "var(--font-display)", fontStyle: "italic",
-                    fontSize: "clamp(1.6rem, 5vw, 2.1rem)", fontWeight: 700,
-                    letterSpacing: "-0.02em", lineHeight: 1.15,
+                    fontSize: "clamp(1.75rem, 5vw, 2.5rem)", fontWeight: 700,
+                    letterSpacing: "-0.02em", lineHeight: 1.1,
                 }}>
                     People
                 </h1>
-                <p style={{ color: "var(--muted)", fontSize: "0.88rem", marginTop: "0.3rem" }}>
-                    Faces grouped by person across all your jobs
+                <p style={{ color: "var(--muted)", fontSize: "0.95rem", marginTop: "0.5rem" }}>
+                    Faces grouped by person across all your uploads
                 </p>
             </div>
 

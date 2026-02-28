@@ -104,15 +104,15 @@ export default function AlbumsPage() {
             )}
 
             {albums.length > 0 && (
-                <div className="albums-grid">
+                <div className="responsive-grid" style={{ gap: '1rem' }}>
                     {/* Create New Card */}
-                    <div className="album-card" onClick={handleCreateAlbum} style={{ cursor: "pointer" }}>
+                    <div className="album-card" onClick={handleCreateAlbum} style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: '0.75rem' }}>
                         <div className="album-cover-placeholder"
-                            style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
-                            {creating ? <Loader size={24} className="spin" /> : <Plus size={24} strokeWidth={2.5} />}
+                            style={{ background: "var(--accent-soft)", color: "var(--accent)", aspectRatio: '1', borderRadius: 'var(--r-md)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {creating ? <Loader size={32} className="spin" /> : <Plus size={32} strokeWidth={2.5} />}
                         </div>
                         <div className="album-info">
-                            <p className="album-name" style={{ color: "var(--accent)" }}>New Album</p>
+                            <p className="album-name" style={{ color: "var(--accent)", fontWeight: 700 }}>New Album</p>
                             <p className="album-count">Create a collection</p>
                         </div>
                     </div>
@@ -120,18 +120,19 @@ export default function AlbumsPage() {
                     {/* Real Albums */}
                     {albums.map((album) => (
                         <div className="album-card" key={album.id}
+                            style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: '0.75rem' }}
                             onClick={() => router.push(`/albums/${album.id}`)}>
-                            <div className="album-cover-placeholder" style={{ background: "var(--bg-subtle)", position: "relative" }}>
+                            <div className="album-cover-placeholder" style={{ background: "var(--bg-subtle)", position: "relative", aspectRatio: '1', borderRadius: 'var(--r-md)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 {album.coverUrl ? (
                                     <img src={album.coverUrl} alt={album.name} style={{
                                         width: "100%", height: "100%", objectFit: "cover",
                                     }} />
                                 ) : (
-                                    <Image size={24} strokeWidth={1.5} color="var(--muted)" />
+                                    <Image size={32} strokeWidth={1.5} color="var(--muted)" />
                                 )}
                             </div>
                             <div className="album-info">
-                                <p className="album-name">{album.name}</p>
+                                <p className="album-name" style={{ fontWeight: 700 }}>{album.name}</p>
                                 <p className="album-count">{album.count} photos</p>
                             </div>
                         </div>

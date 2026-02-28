@@ -327,8 +327,8 @@ export default function UploadPage() {
                 className={`panel${dragOver ? " drag-over" : ""}`}
                 style={{
                     display: "flex", flexDirection: "column", alignItems: "center",
-                    justifyContent: "center", gap: "0.5rem", padding: "2.5rem 1rem",
-                    marginBottom: "1.5rem", border: "2px dashed var(--line)",
+                    justifyContent: "center", gap: "1rem", padding: "4rem 2rem",
+                    marginBottom: "2rem", border: "2px dashed var(--line)",
                     borderRadius: "var(--r-lg)", transition: "all 0.2s",
                 }}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -336,16 +336,19 @@ export default function UploadPage() {
                 onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
                 onClick={() => inputRef.current?.click()}
             >
-                <div style={{ padding: "0.75rem", borderRadius: "50%", background: "var(--accent-soft)" }}>
-                    <Upload size={28} color="var(--accent)" />
+                <div style={{ padding: "1.25rem", borderRadius: "50%", background: "var(--accent-soft)" }}>
+                    <Upload size={40} color="var(--accent)" />
                 </div>
-                <p style={{ fontWeight: 600, fontSize: "0.9rem" }}>Upload Photos & ZIPs</p>
+                <div style={{ textAlign: "center" }}>
+                    <p style={{ fontWeight: 700, fontSize: "1.25rem", marginBottom: '0.25rem' }}>Upload Photos & ZIPs</p>
+                    <p className="desktop-only" style={{ fontSize: "0.9rem", color: "var(--muted)" }}>Drag and drop files here, or use the buttons below</p>
+                </div>
 
-                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                    <button className="btn btn-primary btn-sm" onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
+                <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>
+                    <button className="btn btn-primary" style={{ padding: '0.75rem 2rem' }} onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}>
                         Select Photos
                     </button>
-                    <button className="btn btn-secondary btn-sm" onClick={(e) => {
+                    <button className="btn btn-secondary" style={{ padding: '0.75rem 2rem' }} onClick={(e) => {
                         e.stopPropagation();
                         const zipInput = document.createElement('input');
                         zipInput.type = 'file';
@@ -358,8 +361,9 @@ export default function UploadPage() {
                     </button>
                 </div>
 
-                <p style={{ fontSize: "0.65rem", color: "var(--muted)", marginTop: "0.5rem", opacity: 0.8 }}>
-                    On mobile, use &quot;Files&quot; or &quot;Browse&quot; for ZIPs.
+                <p style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "1rem", opacity: 0.8 }}>
+                    <span className="mobile-only">On mobile, use &quot;Files&quot; or &quot;Browse&quot; for ZIPs.</span>
+                    <span className="desktop-only">Supports high-speed B2 uploads with client-side deduplication.</span>
                 </p>
 
                 <input

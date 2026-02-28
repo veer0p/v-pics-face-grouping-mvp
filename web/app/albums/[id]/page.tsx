@@ -98,40 +98,34 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
         <div className="page-shell" style={{ padding: 0 }}>
             {/* Header */}
             <div style={{
-                display: "flex", alignItems: "center", gap: "0.65rem",
-                padding: "0.75rem 1rem", paddingTop: "max(0.75rem, env(safe-area-inset-top))",
+                display: "flex", alignItems: "center", gap: "1rem",
+                padding: "1.5rem 2rem", borderBottom: '1px solid var(--line)'
             }}>
-                <button className="btn btn-icon btn-secondary" onClick={() => router.push("/albums")} aria-label="Back">
+                <button className="btn btn-icon btn-secondary mobile-only" onClick={() => router.push("/albums")} aria-label="Back">
                     <ArrowLeft size={18} strokeWidth={2} />
                 </button>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontWeight: 700, fontSize: "1rem", fontFamily: "var(--font-display)", fontStyle: "italic" }}>
+                    <h1 style={{ fontWeight: 700, fontSize: "clamp(1.2rem, 3vw, 1.75rem)", fontFamily: "var(--font-display)", fontStyle: "italic" }}>
                         {album.name}
-                    </p>
-                    <p style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                    </h1>
+                    <p style={{ fontSize: "0.9rem", color: "var(--muted)", marginTop: '0.2rem' }}>
                         {photos.length} {photos.length === 1 ? "photo" : "photos"}
                     </p>
                 </div>
                 <div style={{ position: "relative" }}>
                     <button className="btn btn-icon btn-secondary" onClick={() => setShowMenu(!showMenu)}>
-                        <MoreVertical size={18} strokeWidth={2} />
+                        <MoreVertical size={20} strokeWidth={2} />
                     </button>
                     {showMenu && (
                         <>
                             <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setShowMenu(false)} />
-                            <div style={{
-                                position: "absolute", top: "100%", right: 0, zIndex: 50,
-                                background: "var(--bg-elevated)", border: "1px solid var(--line)",
-                                borderRadius: "var(--r-md)", padding: "0.4rem", minWidth: "140px",
-                                boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-                                animation: "fade-in 150ms ease",
-                            }}>
+                            <div className="dropdown-menu" style={{ top: "100%", right: 0 }}>
                                 <button className="menu-item" onClick={() => { setShowMenu(false); handleRename(); }}>
-                                    <Edit3 size={14} /> Rename
+                                    <Edit3 size={16} /> Rename
                                 </button>
                                 <button className="menu-item" style={{ color: "var(--error)" }}
                                     onClick={() => { setShowMenu(false); handleDeleteAlbum(); }}>
-                                    {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
+                                    {deleting ? <Loader size={16} className="spin" /> : <Trash2 size={16} />}
                                     Delete Album
                                 </button>
                             </div>
@@ -141,34 +135,34 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
             </div>
 
             {/* Photo grid */}
-            {photos.length === 0 ? (
-                <div className="empty-state" style={{ minHeight: 300 }}>
-                    <div style={{
-                        width: 56, height: 56, borderRadius: "var(--r-lg)",
-                        background: "var(--bg-subtle)", display: "flex",
-                        alignItems: "center", justifyContent: "center", marginBottom: "0.5rem",
-                    }}>
-                        <ImageIcon size={24} color="var(--muted)" strokeWidth={1.5} />
-                    </div>
-                    <p className="empty-state-title">Album is empty</p>
-                    <p className="empty-state-sub">Add photos to this collection to see them here.</p>
-                </div>
-            ) : (
-                <div style={{
-                    display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "2px",
-                    padding: "0.15rem",
-                }}>
-                    {photos.map((p) => (
-                        <div key={p.id} className="press-scale" style={{
-                            aspectRatio: "1", background: "var(--bg-subtle)", position: "relative"
-                        }} onClick={() => router.push(`/photo/${p.id}`)}>
-                            <img src={p.thumbUrl} alt={p.filename} style={{
-                                width: "100%", height: "100%", objectFit: "cover",
-                            }} />
+            <div style={{ padding: '1rem 2rem' }}>
+                {photos.length === 0 ? (
+                    <div className="empty-state" style={{ minHeight: 400 }}>
+                        <div style={{
+                            width: 72, height: 72, borderRadius: "var(--r-lg)",
+                            background: "var(--bg-subtle)", display: "flex",
+                            alignItems: "center", justifyContent: "center", marginBottom: "1rem",
+                        }}>
+                            <ImageIcon size={32} color="var(--muted)" strokeWidth={1.5} />
                         </div>
-                    ))}
-                </div>
-            )}
+                        <p className="empty-state-title" style={{ fontSize: '1.25rem' }}>Album is empty</p>
+                        <p className="empty-state-sub">Add photos to this collection to see them here.</p>
+                    </div>
+                ) : (
+                    <div className="responsive-grid" style={{ gap: "8px" }}>
+                        {photos.map((p) => (
+                            <div key={p.id} className="press-scale" style={{
+                                aspectRatio: "1", background: "var(--bg-subtle)", position: "relative",
+                                borderRadius: 'var(--r-sm)', overflow: 'hidden'
+                            }} onClick={() => router.push(`/photo/${p.id}`)}>
+                                <img src={p.thumbUrl} alt={p.filename} style={{
+                                    width: "100%", height: "100%", objectFit: "cover",
+                                }} />
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {/* Floating Add button */}
             <div style={{

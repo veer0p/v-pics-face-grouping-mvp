@@ -163,96 +163,88 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
             position: "fixed", inset: 0, zIndex: 100,
             background: "#000", display: "flex", flexDirection: "column",
         }}>
-            {/* Top bar */}
-            <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "0.65rem 0.75rem",
-                paddingTop: "calc(0.65rem + env(safe-area-inset-top))",
-                background: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)",
-                position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
-            }}>
-                <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
-                    <ArrowLeft size={22} />
-                </button>
-                <div style={{ display: "flex", gap: "0.15rem" }}>
-                    <button onClick={toggleLike} style={btnStyle}>
-                        <Heart size={20} color={liked ? "#ff4d6a" : "#fff"}
-                            fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
-                    </button>
-                    <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
-                        <Info size={20} />
-                    </button>
-                    <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
-                        <Download size={20} />
-                    </button>
-                    <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
-                        <Trash2 size={20} />
-                    </button>
-                </div>
-            </div>
-
-            {/* Full-res image with blur-up */}
-            <div style={{
-                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                overflow: "hidden", position: "relative",
-            }}>
-                {!fullLoaded && (
-                    <img src={photo.thumbUrl} alt="" style={{
-                        position: "absolute", width: "100%", height: "100%",
-                        objectFit: "contain", filter: "blur(12px)", transform: "scale(1.05)",
-                    }} />
-                )}
-                <img
-                    src={photo.url}
-                    alt={photo.filename}
-                    onLoad={() => setFullLoaded(true)}
-                    style={{
-                        maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
-                        opacity: fullLoaded ? 1 : 0, transition: "opacity 400ms ease",
-                        position: "relative", zIndex: 1,
-                    }}
-                />
-            </div>
-
-            {/* Info panel — slides up from bottom */}
-            {showInfo && (
-                <div style={{
-                    position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "60vh",
-                    overflowY: "auto", background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)",
-                    padding: "1.25rem", paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
-                    borderRadius: "1.25rem 1.25rem 0 0", zIndex: 30,
-                    animation: "slide-up-sheet 250ms cubic-bezier(0.16,1,0.3,1)",
-                    color: "#fff",
-                }}>
-                    {/* Header */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                        <span style={{ fontWeight: 700, fontSize: "1rem" }}>Details</span>
-                        <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "#aaa" }}>
-                            <X size={18} />
+            <div className="photo-viewer-container">
+                {/* Main Content (Image) */}
+                <div className="photo-viewer-main">
+                    {/* Top bar (Floating on mobile, potentially integrated on desktop) */}
+                    <div style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "0.85rem 1rem",
+                        paddingTop: "calc(0.85rem + env(safe-area-inset-top))",
+                        background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)",
+                        position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+                    }}>
+                        <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
+                            <ArrowLeft size={24} />
                         </button>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button onClick={toggleLike} style={btnStyle}>
+                                <Heart size={22} color={liked ? "#ff4d6a" : "#fff"}
+                                    fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
+                            </button>
+                            <button className="mobile-only" onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
+                                <Info size={22} />
+                            </button>
+                            <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
+                                <Download size={22} />
+                            </button>
+                            <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
+                                <Trash2 size={22} />
+                            </button>
+                        </div>
                     </div>
 
-                    {/* Date */}
+                    {/* Full-res image with blur-up */}
+                    <div style={{
+                        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                        overflow: "hidden", position: "relative", width: "100%", height: "100%"
+                    }}>
+                        {!fullLoaded && (
+                            <img src={photo.thumbUrl} alt="" style={{
+                                position: "absolute", width: "100%", height: "100%",
+                                objectFit: "contain", filter: "blur(20px)", transform: "scale(1.1)",
+                            }} />
+                        )}
+                        <img
+                            src={photo.url}
+                            alt={photo.filename}
+                            onLoad={() => setFullLoaded(true)}
+                            style={{
+                                maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+                                opacity: fullLoaded ? 1 : 0, transition: "opacity 500ms ease",
+                                position: "relative", zIndex: 1,
+                            }}
+                        />
+                    </div>
+                </div>
+
+                {/* Desktop Aside (Details) */}
+                <aside className="photo-viewer-aside desktop-only">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+                        <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
+                    </div>
+
                     {photo.takenAt && (
-                        <div style={{ marginBottom: "1rem" }}>
-                            <p style={{ fontSize: "1rem", fontWeight: 600 }}>{formatDate(photo.takenAt)}</p>
+                        <div style={{ marginBottom: "2rem" }}>
+                            <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
+                            <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
                         </div>
                     )}
 
                     {/* Camera section */}
                     {(cameraInfo || shootingInfo) && (
                         <div style={{
-                            background: "rgba(255,255,255,0.08)", borderRadius: "0.75rem",
-                            padding: "0.85rem", marginBottom: "0.75rem",
+                            background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                            padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
                         }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem" }}>
-                                <Camera size={16} color="#60a5fa" />
-                                <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                                <Camera size={20} color="var(--accent)" />
+                                <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
                             </div>
                             {shootingInfo && (
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                    <Aperture size={14} color="#888" />
-                                    <span style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.7)", fontFamily: "monospace" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                    <Aperture size={18} color="var(--muted)" />
+                                    <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
                                         {shootingInfo}
                                     </span>
                                 </div>
@@ -263,13 +255,13 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                     {/* GPS */}
                     {photo.gpsLat && photo.gpsLng && (
                         <div style={{
-                            background: "rgba(255,255,255,0.08)", borderRadius: "0.75rem",
-                            padding: "0.85rem", marginBottom: "0.75rem",
+                            background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                            padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
                         }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                <MapPin size={16} color="#34d399" />
-                                <span style={{ fontSize: "0.85rem" }}>
-                                    {photo.gpsLat.toFixed(4)}, {photo.gpsLng.toFixed(4)}
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                <MapPin size={20} color="var(--success)" />
+                                <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+                                    {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
                                 </span>
                             </div>
                         </div>
@@ -277,8 +269,8 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 
                     {/* File info */}
                     <div style={{
-                        display: "grid", gap: "0.45rem", fontSize: "0.82rem",
-                        color: "rgba(255,255,255,0.65)",
+                        display: "grid", gap: "0.75rem", fontSize: "0.9rem",
+                        color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
                     }}>
                         <Row label="Filename" value={photo.filename} />
                         {photo.width && photo.height && (
@@ -287,6 +279,73 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                         <Row label="Size" value={formatBytes(photo.sizeBytes)} />
                         <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
                         <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+                    </div>
+                </aside>
+            </div>
+
+            {/* Mobile Info panel — slides up from bottom */}
+            {showInfo && (
+                <div className="mobile-only" style={{
+                    position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
+                    overflowY: "auto", background: "rgba(0,0,0,0.95)", backdropFilter: "blur(20px)",
+                    padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
+                    borderRadius: "1.5rem 1.5rem 0 0", zIndex: 30,
+                    animation: "slide-up-sheet 300ms cubic-bezier(0.16,1,0.3,1)",
+                    color: "#fff", borderTop: "1px solid rgba(255,255,255,0.1)"
+                }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+                        <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
+                        <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "#aaa" }}>
+                            <X size={20} />
+                        </button>
+                    </div>
+
+                    {/* Info rows same as desktop but for mobile sheet */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                        {photo.takenAt && (
+                            <div>
+                                <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>
+                            </div>
+                        )}
+
+                        {(cameraInfo || shootingInfo) && (
+                            <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1rem" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                                    <Camera size={18} color="#60a5fa" />
+                                    <span style={{ fontSize: "1rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
+                                </div>
+                                {shootingInfo && (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                        <Aperture size={16} color="#aaa" />
+                                        <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.7)", fontFamily: "monospace" }}>
+                                            {shootingInfo}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {photo.gpsLat && photo.gpsLng && (
+                            <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1rem" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                    <MapPin size={18} color="#34d399" />
+                                    <span style={{ fontSize: "0.9rem" }}>
+                                        {photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
+                        <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", marginTop: "0.5rem" }}>
+                            <Row label="Filename" value={photo.filename} />
+                            {photo.width && photo.height && (
+                                <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
+                            )}
+                            <Row label="Size" value={formatBytes(photo.sizeBytes)} />
+                            <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
+                            <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+                        </div>
                     </div>
                 </div>
             )}

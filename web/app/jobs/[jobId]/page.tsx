@@ -192,23 +192,23 @@ export default function JobResultPage() {
     return (
         <div className="page-shell">
             {/* ── Header ── */}
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "1rem", marginBottom: "2.5rem" }}>
                 <div>
                     <h1 style={{
-                        fontFamily: "var(--font-fraunces), Georgia, serif",
+                        fontFamily: "var(--font-display)",
                         fontStyle: "italic",
-                        fontSize: "clamp(1.4rem, 4vw, 1.9rem)",
+                        fontSize: "clamp(1.75rem, 5vw, 2.5rem)",
                         fontWeight: 700,
                         letterSpacing: "-0.02em",
-                        lineHeight: 1.15,
+                        lineHeight: 1.1,
                     }}>
                         Job Result
                     </h1>
-                    <p className="mono" style={{ color: "var(--muted)", marginTop: "0.2rem", fontSize: "0.78rem" }}>
+                    <p className="mono" style={{ color: "var(--muted)", marginTop: "0.5rem", fontSize: "0.85rem" }}>
                         {jobId}
                     </p>
                 </div>
-                <button className="btn btn-secondary btn-sm" onClick={() => router.push("/")}>
+                <button className="btn btn-secondary" onClick={() => router.push("/")} style={{ padding: '0.65rem 1.25rem' }}>
                     + New Upload
                 </button>
             </div>
@@ -255,38 +255,38 @@ export default function JobResultPage() {
             {/* ── Loading / Error ── */}
             {loading && (
                 <div style={{ padding: "2rem 0", textAlign: "center" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "0.65rem", marginBottom: "1rem" }}>
-                        {[...Array(4)].map((_, i) => (
-                            <div key={i} className="skeleton" style={{ height: 80, borderRadius: "var(--r-md)" }} />
+                    <div className="responsive-grid" style={{ gap: "1rem", marginBottom: "2rem" }}>
+                        {[...Array(6)].map((_, i) => (
+                            <div key={i} className="skeleton" style={{ height: 100, borderRadius: "var(--r-md)" }} />
                         ))}
                     </div>
-                    <div className="skeleton" style={{ height: 200, borderRadius: "var(--r-lg)" }} />
+                    <div className="skeleton" style={{ height: 300, borderRadius: "var(--r-lg)" }} />
                 </div>
             )}
             {error && (
                 <div style={{
-                    padding: "0.75rem 1rem", background: "var(--error-soft)", borderRadius: "var(--r-sm)",
-                    color: "var(--error)", fontWeight: 600, fontSize: "0.88rem"
+                    padding: "1rem 1.25rem", background: "var(--error-soft)", borderRadius: "var(--r-sm)",
+                    color: "var(--error)", fontWeight: 600, fontSize: "0.95rem", marginBottom: '2rem'
                 }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}><AlertTriangle size={15} strokeWidth={2.5} /> {error}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}><AlertTriangle size={18} strokeWidth={2.5} /> {error}</span>
                 </div>
             )}
 
             {/* ── Stats ── */}
             {payload && (
-                <div className="stats-row">
+                <div className="stats-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '2.5rem' }}>
                     {[
                         { label: "Images", value: payload.job.stats.total_images ?? "–" },
                         { label: "Detected", value: payload.job.stats.detected_faces ?? "–" },
                         { label: "Clusters", value: payload.job.stats.clusters_count ?? "–" },
                         { label: "Noise", value: payload.job.stats.noise_faces ?? "–" },
                     ].map((s) => (
-                        <div className="stat-card" key={s.label}>
+                        <div className="stat-card" key={s.label} style={{ padding: '1.25rem' }}>
                             <div className="stat-card-value"
-                                style={{ fontFamily: "var(--font-fraunces), Georgia, serif" }}>
+                                style={{ fontFamily: "var(--font-display)", fontStyle: 'italic', fontSize: '1.75rem' }}>
                                 {String(s.value)}
                             </div>
-                            <div className="stat-card-label">{s.label}</div>
+                            <div className="stat-card-label" style={{ fontSize: '0.85rem' }}>{s.label}</div>
                         </div>
                     ))}
                 </div>

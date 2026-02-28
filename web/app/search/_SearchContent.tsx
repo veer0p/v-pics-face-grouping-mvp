@@ -57,12 +57,13 @@ export default function SearchContent() {
     return (
         <div className="page-shell">
             {/* Search Input */}
-            <form onSubmit={handleSubmit} style={{ marginBottom: "1.5rem" }}>
-                <div className="search-page-bar">
-                    <Search size={18} strokeWidth={2} className="search-page-bar-icon" />
+            <form onSubmit={handleSubmit} style={{ marginBottom: "2.5rem" }}>
+                <div className="search-page-bar" style={{ padding: '0.85rem 1.25rem' }}>
+                    <Search size={22} strokeWidth={2} className="search-page-bar-icon" />
                     <input
                         type="text"
                         placeholder="Search photos, people, places…"
+                        style={{ fontSize: '1.1rem' }}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         aria-label="Search"
@@ -73,7 +74,7 @@ export default function SearchContent() {
                             className="app-search-clear"
                             onClick={() => { setQuery(""); router.push("/search"); }}
                         >
-                            <X size={14} strokeWidth={2.5} />
+                            <X size={18} strokeWidth={2.5} />
                         </button>
                     )}
                 </div>

@@ -207,33 +207,33 @@ export default function HomePage() {
             {/* Header */}
             <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: "1rem", position: "sticky", top: 0, zIndex: 50,
-                background: "var(--bg-card)", paddingBottom: "0.5rem",
+                marginBottom: "2rem", position: "sticky", top: 0, zIndex: 40,
+                background: "var(--bg)", padding: "1rem 0",
             }}>
-                <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.5rem", fontWeight: 700 }}>
+                <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.75rem", fontWeight: 700 }}>
                     Photos
                 </h1>
-                <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
                     {selectMode ? (
                         <>
-                            <span style={{ fontSize: "0.82rem", color: "var(--muted)", fontWeight: 600 }}>{selected.size} selected</span>
+                            <span className="desktop-only" style={{ fontSize: "0.9rem", color: "var(--muted)", fontWeight: 600 }}>{selected.size} items selected</span>
                             <button className="app-header-btn" onClick={handleDelete} disabled={deleting} style={{ color: "var(--error)" }}>
-                                {deleting ? <Loader size={18} className="spin" /> : <Trash2 size={18} />}
+                                {deleting ? <Loader size={20} className="spin" /> : <Trash2 size={20} />}
                             </button>
-                            <button className="app-header-btn" onClick={() => setSelected(new Set())}><X size={18} /></button>
+                            <button className="app-header-btn" onClick={() => setSelected(new Set())}><X size={20} /></button>
                         </>
                     ) : (
                         <>
                             <button className={`app-header-btn${filter === "favorites" ? " active" : ""}`}
                                 onClick={() => setFilter(filter === "all" ? "favorites" : "all")}
                                 style={filter === "favorites" ? { color: "#ff4d6a" } : {}}>
-                                <Heart size={18} fill={filter === "favorites" ? "#ff4d6a" : "none"} color={filter === "favorites" ? "#ff4d6a" : undefined} />
+                                <Heart size={20} fill={filter === "favorites" ? "#ff4d6a" : "none"} color={filter === "favorites" ? "#ff4d6a" : undefined} />
                             </button>
                             <button className="app-header-btn" onClick={() => fetchPhotos()} disabled={loading}>
-                                <RefreshCw size={18} className={loading ? "spin" : ""} />
+                                <RefreshCw size={20} className={loading ? "spin" : ""} />
                             </button>
-                            <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")} style={{ gap: "0.35rem" }}>
-                                <Upload size={14} strokeWidth={2.5} /> Upload
+                            <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")} style={{ gap: "0.5rem", padding: "0.5rem 1.25rem" }}>
+                                <Upload size={16} strokeWidth={2.5} /> <span className="desktop-only">Upload Photos</span><span className="mobile-only">Upload</span>
                             </button>
                         </>
                     )}
@@ -242,40 +242,38 @@ export default function HomePage() {
 
             {loading && photos.length === 0 && (
                 <div className="empty-state" style={{ minHeight: "50vh" }}>
-                    <Loader size={28} className="spin" color="var(--accent)" />
+                    <Loader size={32} className="spin" color="var(--accent)" />
                 </div>
             )}
 
             {error && (
-                <div style={{ padding: "0.75rem 1rem", background: "var(--error-soft)", borderRadius: "var(--r-sm)", color: "var(--error)", fontWeight: 600, fontSize: "0.88rem", marginBottom: "1rem" }}>{error}</div>
+                <div style={{ padding: "1rem", background: "var(--error-soft)", borderRadius: "var(--r-md)", color: "var(--error)", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", border: "1px solid var(--error)" }}>{error}</div>
             )}
 
             {!loading && !error && filteredPhotos.length === 0 && (
                 <div className="empty-state" style={{ minHeight: "50vh" }}>
-                    <p className="empty-state-title">{filter === "favorites" ? "No favorites yet" : "No photos yet"}</p>
-                    <button className="btn btn-primary" onClick={() => router.push("/upload")} style={{ marginTop: "1rem" }}>Upload Photos</button>
+                    <p className="empty-state-title" style={{ fontSize: '1.25rem' }}>{filter === "favorites" ? "No favorites yet" : "No photos yet"}</p>
+                    <button className="btn btn-primary" onClick={() => router.push("/upload")} style={{ marginTop: "1.5rem" }}>Upload Photos</button>
                 </div>
             )}
 
             {/* Chronological Grid */}
             {groupedPhotos.map((group) => (
-                <div key={group.title} style={{ marginBottom: "2rem" }}>
+                <div key={group.title} style={{ marginBottom: "3rem" }}>
                     <h2 style={{
-                        fontSize: "0.9rem", fontWeight: 700, color: "var(--ink-1)",
-                        marginBottom: "0.75rem", padding: "0 4px",
+                        fontSize: "1rem", fontWeight: 700, color: "var(--ink-2)",
+                        marginBottom: "1rem", paddingLeft: "4px",
                     }}>
                         {group.title}
                     </h2>
-                    <div style={{
-                        display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                        gap: "2px", borderRadius: "12px", overflow: "hidden"
-                    }}>
+                    <div className="responsive-grid">
                         {group.photos.map((photo) => {
                             const isSelected = selected.has(photo.id);
                             return (
                                 <div key={photo.id} className="press-scale" style={{
                                     position: "relative", aspectRatio: "1",
                                     background: "var(--bg-subtle)", cursor: "pointer",
+                                    borderRadius: "var(--r-sm)", overflow: "hidden"
                                 }}
                                     onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
                                     onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
@@ -285,15 +283,16 @@ export default function HomePage() {
                                         opacity: isSelected ? 0.6 : 1, transition: "opacity 150ms",
                                     }} />
                                     {photo.isLiked && !selectMode && (
-                                        <Heart size={14} fill="#ff4d6a" color="#ff4d6a" style={{ position: "absolute", bottom: 4, right: 4 }} />
+                                        <Heart size={16} fill="#ff4d6a" color="#ff4d6a" style={{ position: "absolute", bottom: 8, right: 8 }} />
                                     )}
                                     {isSelected && (
                                         <div style={{
-                                            position: "absolute", top: 6, right: 6, width: 22, height: 22,
+                                            position: "absolute", top: 8, right: 8, width: 24, height: 24,
                                             borderRadius: "50%", background: "var(--accent)",
                                             display: "flex", alignItems: "center", justifyContent: "center",
+                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
                                         }}>
-                                            <CheckCircle size={14} color="#fff" strokeWidth={3} />
+                                            <CheckCircle size={16} color="#fff" strokeWidth={3} />
                                         </div>
                                     )}
                                 </div>
