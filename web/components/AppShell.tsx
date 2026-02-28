@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Search, Settings } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
 import { InstallPrompt } from "@/components/InstallPrompt";
+import { MatrixBackground } from "@/components/MatrixBackground";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
@@ -28,6 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="app-shell">
+            <MatrixBackground />
             {!hideHeader && (
                 <header
                     className={`app-header${hidden ? " header-hidden" : ""}${scrolled ? " header-scrolled" : ""}`}

@@ -169,7 +169,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                 padding: "0.65rem 0.75rem",
                 paddingTop: "calc(0.65rem + env(safe-area-inset-top))",
                 background: "linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)",
-                position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
+                position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
             }}>
                 <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
                     <ArrowLeft size={22} />
@@ -220,7 +220,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                     position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "60vh",
                     overflowY: "auto", background: "rgba(0,0,0,0.88)", backdropFilter: "blur(16px)",
                     padding: "1.25rem", paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
-                    borderRadius: "1.25rem 1.25rem 0 0",
+                    borderRadius: "1.25rem 1.25rem 0 0", zIndex: 30,
                     animation: "slide-up-sheet 250ms cubic-bezier(0.16,1,0.3,1)",
                     color: "#fff",
                 }}>
