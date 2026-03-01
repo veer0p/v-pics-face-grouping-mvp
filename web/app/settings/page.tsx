@@ -8,6 +8,7 @@ import {
     ChevronRight, Heart,
 } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
+import { ACCENT_PALETTES } from "@/lib/palettes";
 
 type ToggleProps = { on: boolean; onChange: (v: boolean) => void };
 function Toggle({ on, onChange }: ToggleProps) {
@@ -43,7 +44,7 @@ type Stats = { totalPhotos: number; totalBytes: number; trashCount: number; tras
 
 export default function SettingsPage() {
     const router = useRouter();
-    const { theme, setTheme } = useTheme();
+    const { theme, setTheme, resolved, accentIndex, setAccentIndex } = useTheme();
     const [faceRecog, setFaceRecog] = useState(true);
     const [locationOn, setLocationOn] = useState(true);
     const [stats, setStats] = useState<Stats | null>(null);
@@ -71,7 +72,7 @@ export default function SettingsPage() {
                     <div className="panel" style={{ display: "flex", alignItems: "center", gap: "1rem", padding: '1.5rem' }}>
                         <div style={{
                             width: 64, height: 64, borderRadius: "var(--r-pill)",
-                            background: "conic-gradient(from 120deg, #5B4EFF, #FF6B6B, #FFD93D, #5B4EFF)",
+                            background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
                             display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                         }}>
                             <User size={28} color="#fff" strokeWidth={2} />
@@ -132,9 +133,30 @@ export default function SettingsPage() {
                                     </button>
                                 </div>
                             </div>
-                            <SettingRow icon={<Palette size={18} />} label="Accent color" right={
-                                <div style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--accent)" }} />
-                            } />
+                            <div style={{ padding: "1rem", paddingTop: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.85rem" }}>
+                                    <Palette size={18} color="var(--muted)" />
+                                    <span style={{ fontWeight: 500, fontSize: "0.95rem" }}>Accent Color</span>
+                                </div>
+                                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", padding: "4px" }}>
+                                    {ACCENT_PALETTES[resolved].map((palette, i) => (
+                                        <button
+                                            key={palette.name}
+                                            onClick={() => setAccentIndex(i)}
+                                            title={palette.name}
+                                            style={{
+                                                width: 32, height: 32, borderRadius: "50%",
+                                                background: palette.accent,
+                                                border: accentIndex === i ? "3px solid #fff" : "none",
+                                                boxShadow: accentIndex === i ? `0 0 12px ${palette.accent}` : "none",
+                                                cursor: "pointer",
+                                                transition: "all 150ms ease",
+                                                padding: 0
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

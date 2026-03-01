@@ -129,14 +129,15 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     if (error || !photo) {
         return (
             <div style={{
-                position: "fixed", inset: 0, zIndex: 100, background: "#000",
+                position: "fixed", inset: 0, zIndex: 100, background: "var(--bg)",
                 display: "flex", flexDirection: "column", alignItems: "center",
-                justifyContent: "center", gap: "1rem", color: "#fff",
+                justifyContent: "center", gap: "1rem", color: "var(--ink)",
             }}>
-                <p>Photo not found</p>
+                <p style={{ fontWeight: 600 }}>Photo not found</p>
                 <button onClick={() => router.back()} style={{
-                    background: "rgba(255,255,255,0.15)", border: "none", color: "#fff",
-                    padding: "0.5rem 1.25rem", borderRadius: "0.5rem", cursor: "pointer",
+                    background: "var(--bg-subtle)", border: "1px solid var(--line)", color: "var(--ink)",
+                    padding: "0.6rem 1.5rem", borderRadius: "var(--r-md)", cursor: "pointer",
+                    fontWeight: 600,
                 }}>Go Back</button>
             </div>
         );
@@ -180,7 +181,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                                 <Heart size={22} color={liked ? "#ff4d6a" : "#fff"}
                                     fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
                             </button>
-                            <button className="mobile-only" onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
+                            <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
                                 <Info size={22} />
                             </button>
                             <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
@@ -200,84 +201,86 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                 </div>
 
                 {/* Desktop Aside (Details) */}
-                <aside className="photo-viewer-aside desktop-only">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-                        <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
-                    </div>
-
-                    {photo.takenAt && (
-                        <div style={{ marginBottom: "2rem" }}>
-                            <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
-                            <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
+                {showInfo && (
+                    <aside className="photo-viewer-aside desktop-only">
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+                            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
                         </div>
-                    )}
 
-                    {/* Camera section */}
-                    {(cameraInfo || shootingInfo) && (
-                        <div style={{
-                            background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                            padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                        }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                <Camera size={20} color="var(--accent)" />
-                                <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
+                        {photo.takenAt && (
+                            <div style={{ marginBottom: "2rem" }}>
+                                <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
+                                <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
                             </div>
-                            {shootingInfo && (
+                        )}
+
+                        {/* Camera section */}
+                        {(cameraInfo || shootingInfo) && (
+                            <div style={{
+                                background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                                padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
+                            }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                                    <Camera size={20} color="var(--accent)" />
+                                    <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
+                                </div>
+                                {shootingInfo && (
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                        <Aperture size={18} color="var(--muted)" />
+                                        <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
+                                            {shootingInfo}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* GPS */}
+                        {photo.gpsLat && photo.gpsLng && (
+                            <div style={{
+                                background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                                padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
+                            }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                    <Aperture size={18} color="var(--muted)" />
-                                    <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
-                                        {shootingInfo}
+                                    <MapPin size={20} color="var(--success)" />
+                                    <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+                                        {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
                                     </span>
                                 </div>
-                            )}
-                        </div>
-                    )}
-
-                    {/* GPS */}
-                    {photo.gpsLat && photo.gpsLng && (
-                        <div style={{
-                            background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                            padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                        }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                <MapPin size={20} color="var(--success)" />
-                                <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-                                    {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
-                                </span>
                             </div>
-                        </div>
-                    )}
-
-                    {/* File info */}
-                    <div style={{
-                        display: "grid", gap: "0.75rem", fontSize: "0.9rem",
-                        color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
-                    }}>
-                        <Row label="Filename" value={photo.filename} />
-                        {photo.width && photo.height && (
-                            <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
                         )}
-                        <Row label="Size" value={formatBytes(photo.sizeBytes)} />
-                        <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
-                        <Row label="Uploaded" value={formatDate(photo.createdAt)} />
-                    </div>
-                </aside>
+
+                        {/* File info */}
+                        <div style={{
+                            display: "grid", gap: "0.75rem", fontSize: "0.9rem",
+                            color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
+                        }}>
+                            <Row label="Filename" value={photo.filename} />
+                            {photo.width && photo.height && (
+                                <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
+                            )}
+                            <Row label="Size" value={formatBytes(photo.sizeBytes)} />
+                            <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
+                            <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+                        </div>
+                    </aside>
+                )}
             </div>
 
             {/* Mobile Info panel — slides up from bottom */}
             {showInfo && (
                 <div className="mobile-only" style={{
                     position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
-                    overflowY: "auto", background: "rgba(0,0,0,0.95)", backdropFilter: "blur(20px)",
+                    overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
                     padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
                     borderRadius: "1.5rem 1.5rem 0 0", zIndex: 30,
                     animation: "slide-up-sheet 300ms cubic-bezier(0.16,1,0.3,1)",
-                    color: "#fff", borderTop: "1px solid rgba(255,255,255,0.1)"
+                    color: "var(--ink)", borderTop: "1px solid var(--line)"
                 }}>
                     {/* Header */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
                         <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
-                        <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "#aaa" }}>
+                        <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "var(--muted)" }}>
                             <X size={20} />
                         </button>
                     </div>
@@ -291,15 +294,15 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                         )}
 
                         {(cameraInfo || shootingInfo) && (
-                            <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1rem" }}>
+                            <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                                    <Camera size={18} color="#60a5fa" />
+                                    <Camera size={18} color="var(--accent)" />
                                     <span style={{ fontSize: "1rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
                                 </div>
                                 {shootingInfo && (
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                        <Aperture size={16} color="#aaa" />
-                                        <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.7)", fontFamily: "monospace" }}>
+                                        <Aperture size={16} color="var(--muted)" />
+                                        <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
                                             {shootingInfo}
                                         </span>
                                     </div>
@@ -308,9 +311,9 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                         )}
 
                         {photo.gpsLat && photo.gpsLng && (
-                            <div style={{ background: "rgba(255,255,255,0.1)", borderRadius: "1rem", padding: "1rem" }}>
+                            <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                    <MapPin size={18} color="#34d399" />
+                                    <MapPin size={18} color="var(--success)" />
                                     <span style={{ fontSize: "0.9rem" }}>
                                         {photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}
                                     </span>
@@ -318,7 +321,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                             </div>
                         )}
 
-                        <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", marginTop: "0.5rem" }}>
+                        <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.5rem" }}>
                             <Row label="Filename" value={photo.filename} />
                             {photo.width && photo.height && (
                                 <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
@@ -337,8 +340,8 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 function Row({ label, value }: { label: string; value: string }) {
     return (
         <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "rgba(255,255,255,0.45)" }}>{label}</span>
-            <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
+            <span style={{ color: "var(--muted)" }}>{label}</span>
+            <span style={{ color: "var(--ink)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
         </div>
     );
 }

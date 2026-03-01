@@ -5,9 +5,10 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft, MoreVertical, Plus, Image as ImageIcon,
-    Loader, Trash2, Edit3, X, CheckCircle, Search
+    Loader, Trash2, Edit3, X, Check, Search
 } from "lucide-react";
 import { BottomSheet } from "@/components/BottomSheet";
+import { CachedImage } from "@/components/CachedImage";
 
 type Album = {
     id: string;
@@ -157,9 +158,13 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                                 aspectRatio: "1", background: "var(--bg-subtle)", position: "relative",
                                 borderRadius: 'var(--r-sm)', overflow: 'hidden'
                             }} onClick={() => router.push(`/photo/${p.id}`)}>
-                                <img src={p.thumbUrl} alt={p.filename} style={{
-                                    width: "100%", height: "100%", objectFit: "cover",
-                                }} />
+                                <CachedImage
+                                    src={p.thumbUrl || p.url}
+                                    alt={p.filename}
+                                    style={{
+                                        width: "100%", height: "100%", objectFit: "cover",
+                                    }}
+                                />
                             </div>
                         ))}
                     </div>
@@ -277,20 +282,27 @@ function PhotoPicker({ albumId, onAdded, onClose }: { albumId: string, onAdded: 
                                     aspectRatio: "1", background: "var(--bg-subtle)", position: "relative",
                                     borderRadius: 'var(--r-sm)', overflow: 'hidden', cursor: "pointer"
                                 }} onClick={() => toggleSelect(p.id)}>
-                                    <img src={p.thumbUrl} alt="" style={{
-                                        width: "100%", height: "100%", objectFit: "cover",
-                                        opacity: isSelected ? 0.6 : 1, transition: "opacity 150ms"
-                                    }} />
-                                    {isSelected && (
-                                        <div style={{
-                                            position: "absolute", top: 8, right: 8, width: 20, height: 20,
-                                            borderRadius: "50%", background: "var(--accent)",
-                                            display: "flex", alignItems: "center", justifyContent: "center",
-                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
-                                        }}>
-                                            <CheckCircle size={14} color="#fff" strokeWidth={3} />
-                                        </div>
-                                    )}
+                                    <CachedImage
+                                        src={p.thumbUrl || p.url}
+                                        alt=""
+                                        style={{
+                                            width: "100%", height: "100%", objectFit: "cover",
+                                            opacity: isSelected ? 1 : 0.4, transition: "opacity 150ms"
+                                        }}
+                                    />
+                                    <div style={{
+                                        position: "absolute", top: 8, right: 8, width: 22, height: 22,
+                                        borderRadius: "50%",
+                                        background: isSelected ? "var(--accent)" : "var(--bg-elevated)",
+                                        border: `2px solid ${isSelected ? "var(--bg-elevated)" : "var(--accent)"}`,
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                                        transition: "all 150ms ease"
+                                    }}>
+                                        {isSelected && (
+                                            <Check size={14} color="var(--bg-elevated)" strokeWidth={4} />
+                                        )}
+                                    </div>
                                 </div>
                             );
                         })}

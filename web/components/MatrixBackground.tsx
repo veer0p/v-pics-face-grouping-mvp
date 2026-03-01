@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useRef } from 'react';
 
-export const MatrixBackground: React.FC = () => {
+export const MatrixBackground: React.FC<{ accentColor?: string }> = ({ accentColor }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
@@ -24,10 +24,11 @@ export const MatrixBackground: React.FC = () => {
         }
 
         const draw = () => {
+            // Restore trail fade
             ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
             ctx.fillRect(0, 0, width, height);
 
-            ctx.fillStyle = '#0F0'; // Matrix Green
+            ctx.fillStyle = accentColor || '#00FF41';
             ctx.font = `${fontSize}px monospace`;
 
             for (let i = 0; i < drops.length; i++) {
@@ -59,7 +60,7 @@ export const MatrixBackground: React.FC = () => {
             clearInterval(interval);
             window.removeEventListener('resize', handleResize);
         };
-    }, []);
+    }, [accentColor]);
 
     return (
         <canvas
@@ -73,7 +74,7 @@ export const MatrixBackground: React.FC = () => {
                 zIndex: -1,
                 opacity: 0.15, // Subtle raindrops
                 pointerEvents: 'none',
-                background: '#000',
+                background: 'var(--bg)',
             }}
         />
     );

@@ -2,9 +2,9 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
-    Upload, Image, Loader, RefreshCw, Trash2, X, CheckCircle, Heart, FolderPlus, Plus,
+    Upload, Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus,
 } from "lucide-react";
 import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
 import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
@@ -14,22 +14,28 @@ const PAGE_SIZE = 40;
 
 export default function HomePage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
+
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [deleting, setDeleting] = useState(false);
-    const [filter, setFilter] = useState<"all" | "favorites">("all");
     const [showAlbumPicker, setShowAlbumPicker] = useState(false);
     const [albums, setAlbums] = useState<{ id: string, name: string }[]>([]);
     const [addingToAlbum, setAddingToAlbum] = useState<string | null>(null);
+
+    const pullStart = useRef(0);
+    const [pullOffset, setPullOffset] = useState(0);
     const observerRef = useRef<HTMLDivElement>(null);
 
     const selectMode = selected.size > 0;
 
-    // Realtime subscription — new photos from other devices appear instantly
+    // Realtime subscription
     useRealtimePhotos({ photos, setPhotos, enabled: !loading });
 
     const fetchPhotos = useCallback(async (offset = 0, append = false) => {
@@ -38,41 +44,33 @@ export default function HomePage() {
         setError(null);
 
         try {
-            // Smart Refresh: Only fetch from network if there's a change or cache is missing
-            if (offset === 0) {
+            if (offset === 0 && !refreshing) {
                 const cached = PhotoMetadataCache.get(0);
                 const localHash = PhotoMetadataCache.getMetadataHash();
-
                 if (cached && localHash) {
-                    // Check top 40 IDs hash from DB
                     try {
                         const checkRes = await fetch("/api/photos?check_latest=true");
                         if (checkRes.ok) {
                             const { hash: remoteHash } = await checkRes.json();
                             if (remoteHash === localHash) {
-                                console.log("[Cache] Smart Refresh: Cache is up to date (hash match).");
                                 setPhotos(cached);
                                 setHasMore(cached.length === PAGE_SIZE);
                                 return;
                             }
                         }
                     } catch (e) {
-                        console.warn("[Cache] Check latest failed, falling back to network:", e);
+                        console.warn("[Cache] Check latest failed:", e);
                     }
                 }
-            } else {
-                // For offset > 0, check if we have it in cache
+            } else if (offset > 0) {
                 const cached = PhotoMetadataCache.get(offset);
                 if (cached) {
-                    console.log(`[Cache] Loading offset ${offset} from cache.`);
                     setPhotos((prev) => [...prev, ...cached]);
                     setHasMore(cached.length === PAGE_SIZE);
                     return;
                 }
             }
 
-            // Normal network fetch
-            console.info(`[B2-Signing] Fetching fresh metadata from API... (${offset === 0 ? "First Page" : "Offset " + offset})`);
             const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Failed to fetch photos");
@@ -85,7 +83,6 @@ export default function HomePage() {
                 setPhotos(newPhotos);
             }
 
-            // Save to cache (async hashing)
             await PhotoMetadataCache.set(offset, newPhotos);
             setHasMore(newPhotos.length === PAGE_SIZE);
         } catch (err) {
@@ -94,9 +91,41 @@ export default function HomePage() {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, []);
+    }, [refreshing]);
 
-    useEffect(() => { fetchPhotos(); }, [fetchPhotos]);
+    useEffect(() => {
+        fetchPhotos(0, false);
+    }, [fetchPhotos, filter]);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "F5") { e.preventDefault(); fetchPhotos(0, false); }
+        };
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [fetchPhotos]);
+
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if (window.scrollY === 0) pullStart.current = e.touches[0].clientY;
+    };
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (pullStart.current === 0) return;
+        const offset = e.touches[0].clientY - pullStart.current;
+        if (offset > 0) {
+            setPullOffset(Math.min(offset * 0.4, 80));
+            if (offset > 50) e.preventDefault();
+        }
+    };
+    const handleTouchEnd = async () => {
+        if (pullOffset > 60) {
+            setRefreshing(true);
+            setPullOffset(40);
+            await fetchPhotos(0, false);
+            setRefreshing(false);
+        }
+        setPullOffset(0);
+        pullStart.current = 0;
+    };
 
     useEffect(() => {
         const el = observerRef.current;
@@ -117,6 +146,19 @@ export default function HomePage() {
         setSelected((prev) => {
             const next = new Set(prev);
             next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    const toggleGroupSelection = (photoIds: string[]) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            const allSelected = photoIds.every(id => next.has(id));
+            if (allSelected) {
+                photoIds.forEach(id => next.delete(id));
+            } else {
+                photoIds.forEach(id => next.add(id));
+            }
             return next;
         });
     };
@@ -172,7 +214,6 @@ export default function HomePage() {
     const handleCreateAndAdd = async () => {
         const name = prompt("Enter new album name:");
         if (!name?.trim()) return;
-
         setAddingToAlbum("new");
         try {
             const res = await fetch("/api/albums", {
@@ -195,27 +236,22 @@ export default function HomePage() {
         return filter === "favorites" ? photos.filter((p) => p.isLiked) : photos;
     }, [photos, filter]);
 
-    // Chronological Sort (Perfect interleaving)
     const sortedPhotos = useMemo(() => {
         return [...filteredPhotos].sort((a, b) => {
             const dateA = new Date(a.takenAt || a.createdAt).getTime();
             const dateB = new Date(b.takenAt || b.createdAt).getTime();
-            return dateB - dateA; // Latest first
+            return dateB - dateA;
         });
     }, [filteredPhotos]);
 
-    // Grouping Logic
     const groupedPhotos = useMemo(() => {
         const groups: { title: string; photos: Photo[] }[] = [];
         sortedPhotos.forEach((photo) => {
             const date = new Date(photo.takenAt || photo.createdAt);
             const title = formatDateHeader(date);
             const lastGroup = groups[groups.length - 1];
-            if (lastGroup && lastGroup.title === title) {
-                lastGroup.photos.push(photo);
-            } else {
-                groups.push({ title, photos: [photo] });
-            }
+            if (lastGroup && lastGroup.title === title) lastGroup.photos.push(photo);
+            else groups.push({ title, photos: [photo] });
         });
         return groups;
     }, [sortedPhotos]);
@@ -224,50 +260,26 @@ export default function HomePage() {
         const now = new Date();
         const yesterday = new Date();
         yesterday.setDate(now.getDate() - 1);
-
         if (date.toDateString() === now.toDateString()) return "Today";
         if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-
         const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined };
         return date.toLocaleDateString(undefined, options);
     }
 
     return (
-        <div className="page-shell">
-            {/* Header */}
+        <div className="page-shell"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            style={{ paddingTop: "1rem" }}
+        >
             <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: "2rem", position: "sticky", top: 0, zIndex: 40,
-                background: "var(--bg)", padding: "1rem 0",
+                height: pullOffset, overflow: "hidden", display: "flex",
+                alignItems: "center", justifyContent: "center",
+                transition: pullOffset === 0 ? "height 300ms ease" : "none",
+                color: "var(--accent)"
             }}>
-                <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.75rem", fontWeight: 700 }}>
-                    Photos
-                </h1>
-                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-                    {selectMode ? (
-                        <>
-                            <span className="desktop-only" style={{ fontSize: "0.9rem", color: "var(--muted)", fontWeight: 600 }}>{selected.size} items selected</span>
-                            <button className="app-header-btn" onClick={handleDelete} disabled={deleting} style={{ color: "var(--error)" }}>
-                                {deleting ? <Loader size={20} className="spin" /> : <Trash2 size={20} />}
-                            </button>
-                            <button className="app-header-btn" onClick={() => setSelected(new Set())}><X size={20} /></button>
-                        </>
-                    ) : (
-                        <>
-                            <button className={`app-header-btn${filter === "favorites" ? " active" : ""}`}
-                                onClick={() => setFilter(filter === "all" ? "favorites" : "all")}
-                                style={filter === "favorites" ? { color: "#ff4d6a" } : {}}>
-                                <Heart size={20} fill={filter === "favorites" ? "#ff4d6a" : "none"} color={filter === "favorites" ? "#ff4d6a" : undefined} />
-                            </button>
-                            <button className="app-header-btn" onClick={() => fetchPhotos()} disabled={loading}>
-                                <RefreshCw size={20} className={loading ? "spin" : ""} />
-                            </button>
-                            <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")} style={{ gap: "0.5rem", padding: "0.5rem 1.25rem" }}>
-                                <Upload size={16} strokeWidth={2.5} /> <span className="desktop-only">Upload Photos</span><span className="mobile-only">Upload</span>
-                            </button>
-                        </>
-                    )}
-                </div>
+                {refreshing ? <Loader size={24} className="spin" /> : <RefreshCw size={24} style={{ transform: `rotate(${pullOffset * 4}deg)`, opacity: pullOffset / 80 }} />}
             </div>
 
             {loading && photos.length === 0 && (
@@ -287,15 +299,26 @@ export default function HomePage() {
                 </div>
             )}
 
-            {/* Chronological Grid */}
             {groupedPhotos.map((group) => (
                 <div key={group.title} style={{ marginBottom: "3rem" }}>
-                    <h2 style={{
-                        fontSize: "1rem", fontWeight: 700, color: "var(--ink-2)",
-                        marginBottom: "1rem", paddingLeft: "4px",
-                    }}>
-                        {group.title}
-                    </h2>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", padding: "0 4px" }}>
+                        <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--ink-2)" }}>{group.title}</h2>
+                        {selectMode && (
+                            <button
+                                onClick={() => toggleGroupSelection(group.photos.map(p => p.id))}
+                                style={{
+                                    background: group.photos.every(p => selected.has(p.id)) ? "var(--accent)" : "var(--bg-elevated)",
+                                    border: `2px solid ${group.photos.every(p => selected.has(p.id)) ? "var(--bg-elevated)" : "var(--accent)"}`,
+                                    cursor: "pointer", color: "var(--bg-elevated)",
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                    width: 28, height: 28, borderRadius: "50%", transition: "all 150ms ease",
+                                    boxShadow: "0 2px 6px rgba(0,0,0,0.1)"
+                                }}
+                            >
+                                {group.photos.every(p => selected.has(p.id)) && <Check size={18} strokeWidth={3.5} />}
+                            </button>
+                        )}
+                    </div>
                     <div className="responsive-grid">
                         {group.photos.map((photo) => {
                             const isSelected = selected.has(photo.id);
@@ -308,23 +331,19 @@ export default function HomePage() {
                                     onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
                                     onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
                                 >
-                                    <CachedImage
-                                        src={photo.thumbUrl || photo.url}
-                                        alt=""
-                                        className="w-full h-full object-cover block transition-opacity duration-150"
-                                        style={{ opacity: isSelected ? 0.6 : 1 }}
+                                    <CachedImage src={photo.thumbUrl || photo.url} alt="" className="w-full h-full object-cover block transition-opacity duration-150"
+                                        style={{ width: "100%", height: "100%", objectFit: "cover", opacity: selectMode ? (isSelected ? 1 : 0.4) : 1 }}
                                     />
-                                    {photo.isLiked && !selectMode && (
-                                        <Heart size={16} fill="#ff4d6a" color="#ff4d6a" style={{ position: "absolute", bottom: 8, right: 8 }} />
-                                    )}
-                                    {isSelected && (
+                                    {photo.isLiked && !selectMode && <Heart size={16} fill="var(--accent)" color="var(--accent)" style={{ position: "absolute", bottom: 8, right: 8 }} />}
+                                    {selectMode && (
                                         <div style={{
-                                            position: "absolute", top: 8, right: 8, width: 24, height: 24,
-                                            borderRadius: "50%", background: "var(--accent)",
+                                            position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
+                                            background: isSelected ? "var(--accent)" : "var(--bg-elevated)",
+                                            border: `2px solid ${isSelected ? "var(--bg-elevated)" : "var(--accent)"}`,
                                             display: "flex", alignItems: "center", justifyContent: "center",
-                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)", transition: "all 150ms ease"
                                         }}>
-                                            <CheckCircle size={16} color="#fff" strokeWidth={3} />
+                                            {isSelected && <Check size={16} color="var(--bg-elevated)" strokeWidth={4} />}
                                         </div>
                                     )}
                                 </div>
@@ -337,7 +356,6 @@ export default function HomePage() {
             <div ref={observerRef} style={{ height: 100 }} />
             {loadingMore && <div style={{ textAlign: "center", padding: "1rem" }}><Loader size={20} className="spin" color="var(--accent)" /></div>}
 
-            {/* Select action bar (same as before) */}
             {selectMode && (
                 <div style={{
                     position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom))",
@@ -347,27 +365,19 @@ export default function HomePage() {
                     background: "var(--bg-elevated)", border: "1px solid var(--line)",
                     boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
                 }}>
-                    <button className="btn btn-ghost btn-sm"
-                        onClick={() => {
-                            selected.size === filteredPhotos.length
-                                ? setSelected(new Set())
-                                : setSelected(new Set(filteredPhotos.map((p) => p.id)));
-                        }}>
-                        {selected.size === filteredPhotos.length ? "Deselect All" : "Select All"}
-                    </button>
+                    <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</div>
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                         <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
                             <FolderPlus size={14} /> Album
                         </button>
                         <button className="btn btn-sm" style={{ background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleDelete} disabled={deleting}>
                             {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
-                            Delete {selected.size}
+                            Delete
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* Album Picker Modal (same as before) */}
             {showAlbumPicker && (
                 <div style={{
                     position: "fixed", inset: 0, zIndex: 100,
@@ -397,18 +407,10 @@ export default function HomePage() {
                     </div>
                     <style jsx>{`
                         .album-picker-item {
-                            display: flex;
-                            align-items: center;
-                            gap: 0.75rem;
-                            width: 100%;
-                            padding: 1rem;
-                            border: 1px solid var(--line);
-                            background: var(--bg-card);
-                            border-radius: var(--r-md);
-                            font-size: 0.95rem;
-                            font-weight: 600;
-                            cursor: pointer;
-                            text-align: left;
+                            display: flex; align-items: center; gap: 0.75rem; width: 100%;
+                            padding: 1rem; border: 1px solid var(--line);
+                            background: var(--bg-card); border-radius: var(--r-md);
+                            font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: left;
                         }
                     `}</style>
                 </div>

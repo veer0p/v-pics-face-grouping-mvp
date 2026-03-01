@@ -45,7 +45,7 @@ export function CachedImage({ src, alt, className, style, loading = "lazy" }: Ca
 
     if (!blobUrl && !error) {
         return (
-            <div className={`flex items-center justify-center bg-gray-100/50 animate-pulse ${className}`}>
+            <div className={`flex items-center justify-center bg-gray-100/50 animate-pulse ${className}`} style={style}>
                 <Loader className="w-5 h-5 text-gray-300 animate-spin" />
             </div>
         );

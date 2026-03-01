@@ -318,8 +318,8 @@ img {
     width: 2rem;
     height: 2rem;
     border-radius: var(--r-pill);
-    background: conic-gradient(from 0deg, #00FF41, #003B00, #00FF41);
-    box-shadow: 0 0 15px rgba(0, 255, 65, 0.5);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 0 15px var(--accent-soft);
     flex-shrink: 0;
 }
 
@@ -429,8 +429,8 @@ img {
     width: 100%;
     height: 100%;
     border-radius: var(--r-pill);
-    background: conic-gradient(from 120deg, #5B4EFF, #FF6B6B, #FFD93D, #5B4EFF);
-    box-shadow: 0 2px 8px rgba(91, 78, 255, 0.3);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 2px 8px var(--accent-soft);
 }
 
 /* ── Bottom Navigation (Floating Pill) ────────────────── */
@@ -481,6 +481,31 @@ img {
     min-height: 44px;
     position: relative;
     cursor: pointer;
+    flex-direction: column;
+}
+
+.bottom-nav-item.prominent {
+    flex: 0 0 64px;
+    height: 64px;
+    background: var(--accent);
+    color: var(--bg-elevated);
+    border-radius: 50%;
+    margin-top: -30px;
+    box-shadow: 0 8px 16px var(--accent-soft);
+    border: 4px solid var(--bg-elevated);
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bottom-nav-item.prominent:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px var(--accent-soft);
+}
+
+.bottom-nav-item.prominent .nav-icon {
+    color: var(--bg-elevated);
 }
 
 .bottom-nav-item:hover {
@@ -502,12 +527,42 @@ img {
     line-height: 1;
 }
 
-.nav-label {
-    font-size: 0.68rem;
-    line-height: 1;
+
+/* ── Desktop FAB ────────────────── */
+.desktop-fab {
+    display: none;
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    width: 56px;
+    height: 56px;
+    background: var(--accent);
+    color: var(--bg-elevated);
+    border-radius: 16px;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 8px 24px var(--accent-soft);
+    border: none;
+    cursor: pointer;
+    z-index: 40;
+    transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
-/* ── Page Content ─────────────────────────────────────── */
+@media (min-width: 1024px) {
+    .desktop-fab {
+        display: flex;
+    }
+}
+
+.desktop-fab:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 32px var(--accent-soft);
+}
+
+.desktop-fab:active {
+    transform: translateY(-1px);
+}
+
 .page-content {
     flex: 1;
     padding-top: calc(64px + env(safe-area-inset-top));

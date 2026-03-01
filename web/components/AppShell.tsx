@@ -2,18 +2,30 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Settings } from "lucide-react";
+import { Heart, Settings } from "lucide-react";
 import { BottomNav } from "@/components/BottomNav";
+import { FloatingUploadButton } from "@/components/FloatingUploadButton";
 import { Sidebar } from "@/components/Sidebar";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatrixBackground } from "@/components/MatrixBackground";
 import { PookieBackground } from "@/components/PookieBackground";
 import { useTheme } from "./ThemeProvider";
+import { ACCENT_PALETTES } from "@/lib/palettes";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-    const { resolved } = useTheme();
+    const { resolved, accentIndex } = useTheme();
+    const activePalette = ACCENT_PALETTES[resolved][accentIndex] || ACCENT_PALETTES[resolved][0];
     const pathname = usePathname();
     const router = useRouter();
+
+    // Favorites filter logic
+    const isFavorites = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("filter") === "favorites";
+    const toggleFavorites = () => {
+        const params = new URLSearchParams(window.location.search);
+        if (isFavorites) params.delete("filter");
+        else params.set("filter", "favorites");
+        router.push(`${pathname}?${params.toString()}`);
+    };
     const [scrolled, setScrolled] = useState(false);
     const [hidden, setHidden] = useState(false);
     const lastScrollY = useRef(0);
@@ -34,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="app-shell">
-            {resolved === "dark" ? <MatrixBackground /> : <PookieBackground />}
+            {resolved === "dark" ? <MatrixBackground accentColor={activePalette.accent} /> : <PookieBackground accentIndex={accentIndex} />}
 
             {showSidebar && <Sidebar />}
 
@@ -43,22 +55,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className={`app-header${hidden ? " header-hidden" : ""}${scrolled ? " header-scrolled" : ""}`}
                 >
                     <div className="app-header-inner">
-                        {/* Logo */}
-                        <div className="app-logo">
-                            <div className="app-logo-mark" aria-hidden="true" />
-                            <span className="app-logo-text">V‑Pics</span>
-                        </div>
 
                         {/* Spacer */}
                         <div style={{ flex: 1 }} />
 
-                        {/* Search icon → navigates to /search */}
+                        {/* Favorites toggle icon */}
                         <button
-                            className="app-header-btn"
-                            onClick={() => router.push("/search")}
-                            aria-label="Search"
+                            className={`app-header-btn${isFavorites ? " active" : ""}`}
+                            onClick={toggleFavorites}
+                            aria-label="Filter Favorites"
+                            style={isFavorites ? { color: "var(--accent)" } : {}}
                         >
-                            <Search size={20} strokeWidth={2} />
+                            <Heart size={20} fill={isFavorites ? "var(--accent)" : "none"} strokeWidth={2} />
                         </button>
 
                         {/* Settings icon → navigates to /settings */}
@@ -84,6 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             {!hideHeader && <InstallPrompt />}
             {!hideHeader && <BottomNav />}
+            {!hideHeader && <FloatingUploadButton />}
         </div>
     );
 }

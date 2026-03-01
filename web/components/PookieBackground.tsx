@@ -12,7 +12,7 @@ interface Particle {
     driftSpeed: number;
 }
 
-export const PookieBackground: React.FC = () => {
+export const PookieBackground: React.FC<{ accentIndex?: number }> = ({ accentIndex = 0 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
@@ -25,7 +25,14 @@ export const PookieBackground: React.FC = () => {
         let width = (canvas.width = window.innerWidth);
         let height = (canvas.height = window.innerHeight);
 
-        const emojis = ["❤️", "✨", "🌸", "⭐", "🎀", "🍓", "🍭", "🧸", "🍼"];
+        const emojiSets = [
+            ["❤️", "✨", "🌸", "🎀", "🍓", "🍭"], // Strawberry
+            ["✨", "💜", "🌌", "🦄", "🌙", "🪁"], // Lavender
+            ["🍑", "🍊", "☀️", "✨", "🍦", "🎈"], // Peach
+            ["🍃", "🌿", "🍀", "✨", "🍏", "🍵"], // Mint
+            ["☁️", "✈️", "✨", "💙", "🪁", "🎈"], // Sky
+        ];
+        const emojis = emojiSets[accentIndex] || emojiSets[0];
         const particles: Particle[] = [];
         const particleCount = 28; // Keep it clean and elegant
 
@@ -89,7 +96,7 @@ export const PookieBackground: React.FC = () => {
             cancelAnimationFrame(animationId);
             window.removeEventListener('resize', handleResize);
         };
-    }, []);
+    }, [accentIndex]);
 
     return (
         <canvas
@@ -102,7 +109,7 @@ export const PookieBackground: React.FC = () => {
                 height: '100vh',
                 zIndex: -1,
                 pointerEvents: 'none',
-                background: '#FFF0F3', // Theme base
+                background: 'var(--bg)', // Theme base
                 transition: 'background 1s ease',
             }}
         />
