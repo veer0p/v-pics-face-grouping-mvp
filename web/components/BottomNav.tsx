@@ -33,7 +33,7 @@ export function BottomNav() {
                         >
                             <span className="nav-icon">
                                 <item.Icon
-                                    size={item.isProminent ? 28 : 22}
+                                    size={item.isProminent ? 32 : 22}
                                     strokeWidth={isActive || item.isProminent ? 2.5 : 1.7}
                                     fill={isActive && !item.isProminent ? "currentColor" : "none"}
                                 />

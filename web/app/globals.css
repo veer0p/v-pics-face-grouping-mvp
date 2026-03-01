@@ -485,12 +485,12 @@ img {
 }
 
 .bottom-nav-item.prominent {
-    flex: 0 0 64px;
-    height: 64px;
+    flex: 0 0 72px;
+    height: 72px;
     background: var(--accent);
     color: var(--bg-elevated);
     border-radius: 50%;
-    margin-top: -30px;
+    margin-top: -34px;
     box-shadow: 0 8px 16px var(--accent-soft);
     border: 4px solid var(--bg-elevated);
     z-index: 2;
