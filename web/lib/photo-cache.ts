@@ -364,6 +364,8 @@ export const PhotoDetailCache = {
 /**
  * Image Blob Caching
  */
+const inFlightImageFetches = new Map<string, Promise<string>>();
+
 export const ImageBlobCache = {
     async get(id: string, category: 'thumb' | 'full'): Promise<string | null> {
         if (typeof window === "undefined") return null;
@@ -372,27 +374,46 @@ export const ImageBlobCache = {
         return URL.createObjectURL(blob);
     },
 
-    async fetchAndCache(id: string, url: string, category: 'thumb' | 'full' = 'full'): Promise<string> {
+    async fetchAndCache(id: string, url: string, category: 'thumb' | 'full' = 'full', signal?: AbortSignal): Promise<string> {
         if (typeof window === "undefined") return url;
+
+        const key = `${category}:${id}`;
 
         // 1. Try DB first
         const cachedUrl = await this.get(id, category);
         if (cachedUrl) {
-            console.info(`✅ [Cache] Hit (${category}:${id.slice(0, 8)})`);
             return cachedUrl;
         }
 
-        // 2. Fetch from network
-        console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-        const blob = await res.blob();
+        // 2. Check in-flight (Deduplication)
+        if (inFlightImageFetches.has(key)) {
+            console.debug(`🔗 [Cache] Joining in-flight fetch (${key})`);
+            return inFlightImageFetches.get(key)!;
+        }
 
-        // 3. Store in DB
-        await Store.saveImage(id, blob, category);
-        console.info(`💾 [Cache] Saved (${category}:${id.slice(0, 8)})`);
+        // 3. Fetch from network
+        const fetchPromise = (async () => {
+            try {
+                const res = await fetch(url, { signal });
+                if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+                const blob = await res.blob();
 
-        // 4. Return Object URL
-        return URL.createObjectURL(blob);
+                // 4. Store in DB
+                await Store.saveImage(id, blob, category);
+
+                // 5. Return Object URL
+                return URL.createObjectURL(blob);
+            } catch (err: any) {
+                if (err.name === 'AbortError') {
+                    console.debug(`🛑 [Cache] Fetch aborted (${key})`);
+                }
+                throw err;
+            } finally {
+                inFlightImageFetches.delete(key);
+            }
+        })();
+
+        inFlightImageFetches.set(key, fetchPromise);
+        return fetchPromise;
     }
 };
