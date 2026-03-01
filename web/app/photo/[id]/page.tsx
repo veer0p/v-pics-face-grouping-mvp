@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, use, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft, Heart, Trash2, Download, Info, Loader, X,
@@ -47,87 +47,125 @@ function formatDate(iso: string): string {
 }
 
 export default function PhotoViewerPage({ params }: { params: Promise<{ id: string }> }) {
-    const { id } = use(params);
+    const initialId = use(params).id;
     const router = useRouter();
-    const [photo, setPhoto] = useState<PhotoDetail | null>(null);
+
+    // Core State
+    const [idList, setIdList] = useState<string[]>([]);
+    const [currentIndex, setCurrentIndex] = useState(-1);
+    const [photos, setPhotos] = useState<Record<string, PhotoDetail>>({});
+    const [idAtCenter, setIdAtCenter] = useState(initialId); // For URL sync
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
-    const [liked, setLiked] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
-    const [idList, setIdList] = useState<string[]>([]);
 
+    // Initialize ID List from context
     useEffect(() => {
         const stored = sessionStorage.getItem("current_gallery_context");
         if (stored) {
-            try { setIdList(JSON.parse(stored)); } catch (e) { console.error(e); }
+            try {
+                const list = JSON.parse(stored);
+                setIdList(list);
+                setCurrentIndex(list.indexOf(initialId));
+            } catch (e) { console.error(e); }
+        } else {
+            // Fallback for direct link
+            setIdList([initialId]);
+            setCurrentIndex(0);
         }
-    }, [id]);
+    }, [initialId]);
 
-    const currentIndex = idList.indexOf(id);
-    const prevId = currentIndex > 0 ? idList[currentIndex - 1] : null;
-    const nextId = currentIndex < idList.length - 1 ? idList[currentIndex + 1] : null;
+    // Preloading Logic
+    const preload = useCallback(async (id: string) => {
+        if (!id || photos[id]) return;
+        try {
+            const data = await PhotoDetailCache.fetchAndCache(id);
+            if (data) {
+                setPhotos(prev => ({ ...prev, [id]: data }));
+                // Preload the image blob too (quietly)
+                ImageBlobCache.fetchAndCache(id, data.url, 'full').catch(() => { });
+            }
+        } catch (err) {
+            console.warn("Preload failed for", id, err);
+        }
+    }, [photos]);
 
-    const navigate = (newId: string | null) => {
-        if (!newId) return;
-        setLoading(true);
-        router.replace(`/photo/${newId}`);
+    // Load current and adjacent
+    useEffect(() => {
+        if (currentIndex === -1) return;
+
+        const currentId = idList[currentIndex];
+        const prevId = currentIndex > 0 ? idList[currentIndex - 1] : null;
+        const nextId = currentIndex < idList.length - 1 ? idList[currentIndex + 1] : null;
+
+        setLoading(!photos[currentId]);
+
+        preload(currentId);
+        if (prevId) preload(prevId);
+        if (nextId) preload(nextId);
+
+        // Sync URL (silently)
+        if (currentId !== idAtCenter) {
+            setIdAtCenter(currentId);
+            window.history.replaceState(null, "", `/photo/${currentId}`);
+        }
+    }, [currentIndex, idList, preload, photos, idAtCenter]);
+
+    const navigate = (dir: 'next' | 'prev') => {
+        if (dir === 'next' && currentIndex < idList.length - 1) {
+            setCurrentIndex(prev => prev + 1);
+        } else if (dir === 'prev' && currentIndex > 0) {
+            setCurrentIndex(prev => prev - 1);
+        }
     };
 
+    // Keyboard support
     useEffect(() => {
         const handleKeys = (e: KeyboardEvent) => {
-            if (e.key === "ArrowLeft" && prevId) navigate(prevId);
-            if (e.key === "ArrowRight" && nextId) navigate(nextId);
+            if (e.key === "ArrowLeft") navigate('prev');
+            if (e.key === "ArrowRight") navigate('next');
             if (e.key === "Escape") router.back();
         };
         window.addEventListener("keydown", handleKeys);
         return () => window.removeEventListener("keydown", handleKeys);
-    }, [prevId, nextId, router]);
+    }, [currentIndex, idList, router]);
 
-    useEffect(() => {
-        let active = true;
-        (async () => {
-            try {
-                // 1. Fetch via Smart Cache (Handles hit, miss, and deduplication)
-                const data = await PhotoDetailCache.fetchAndCache(id);
-
-                if (active && data) {
-                    setPhoto(data);
-                    setLiked(data.isLiked);
-                }
-            } catch (err) {
-                if (active) setError(true);
-            } finally {
-                if (active) setLoading(false);
-            }
-        })();
-        return () => { active = false; };
-    }, [id]);
+    const photo = photos[idList[currentIndex]];
 
     const toggleLike = async () => {
         if (!photo) return;
-        const next = !liked;
-        setLiked(next);
-        const updatedPhoto = { ...photo, isLiked: next };
-        setPhoto(updatedPhoto);
+        const nextLiked = !photo.isLiked;
+        const updatedPhoto = { ...photo, isLiked: nextLiked };
 
-        // Optimistic cache update
+        setPhotos(prev => ({ ...prev, [photo.id]: updatedPhoto }));
         await PhotoDetailCache.set(photo.id, updatedPhoto);
 
         await fetch("/api/photos/favorite", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: photo.id, liked: next }),
+            body: JSON.stringify({ id: photo.id, liked: nextLiked }),
         });
     };
 
     const handleDelete = async () => {
         if (!photo) return;
+        const idToDelete = photo.id;
+
+        const newList = idList.filter(id => id !== idToDelete);
+        setIdList(newList);
+
+        if (newList.length === 0) {
+            router.back();
+        } else {
+            setCurrentIndex(Math.min(currentIndex, newList.length - 1));
+        }
+
         await fetch("/api/photos/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids: [photo.id] }),
+            body: JSON.stringify({ ids: [idToDelete] }),
         });
-        router.back();
     };
 
     const handleDownload = async () => {
@@ -148,20 +186,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         }
     };
 
-    // Loading state
-    if (loading) {
-        return (
-            <div style={{
-                position: "fixed", inset: 0, zIndex: 100, background: "#000",
-                display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-                <Loader size={28} className="spin" color="#fff" />
-            </div>
-        );
-    }
-
-    // Error state
-    if (error || !photo) {
+    if (error) {
         return (
             <div style={{
                 position: "fixed", inset: 0, zIndex: 100, background: "var(--bg)",
@@ -184,14 +209,13 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         WebkitTapHighlightColor: "transparent",
     };
 
-    // Camera info string
-    const cameraInfo = [photo.cameraModel, photo.lensModel].filter(Boolean).join(" • ");
-    const shootingInfo = [
+    const cameraInfo = photo ? [photo.cameraModel, photo.lensModel].filter(Boolean).join(" • ") : "";
+    const shootingInfo = photo ? [
         photo.focalLength ? `${photo.focalLength}mm` : null,
         photo.aperture ? `ƒ/${photo.aperture}` : null,
         photo.shutterSpeed ? photo.shutterSpeed : null,
         photo.iso ? `ISO ${photo.iso}` : null,
-    ].filter(Boolean).join("  ·  ");
+    ].filter(Boolean).join("  ·  ") : "";
 
     return (
         <>
@@ -200,22 +224,22 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                 background: "#000", display: "flex", flexDirection: "column",
             }}>
                 <div className="photo-viewer-container">
-                    {/* Main Content (Image) */}
-                    <div className="photo-viewer-main">
+                    <div className="photo-viewer-main" style={{ position: "relative", overflow: "hidden" }}>
+                        {/* Header */}
                         <div style={{
                             display: "flex", alignItems: "center", justifyContent: "space-between",
                             padding: "0.85rem 1rem",
                             paddingTop: "calc(0.85rem + env(safe-area-inset-top))",
                             background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)",
-                            position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+                            position: "absolute", top: 0, left: 0, right: 0, zIndex: 50,
                         }}>
                             <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
                                 <ArrowLeft size={24} />
                             </button>
                             <div style={{ display: "flex", gap: "0.5rem" }}>
                                 <button onClick={toggleLike} style={btnStyle}>
-                                    <Heart size={22} color={liked ? "#ff4d6a" : "#fff"}
-                                        fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
+                                    <Heart size={22} color={photo?.isLiked ? "#ff4d6a" : "#fff"}
+                                        fill={photo?.isLiked ? "#ff4d6a" : "none"} strokeWidth={2} />
                                 </button>
                                 <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
                                     <Info size={22} />
@@ -229,58 +253,43 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                             </div>
                         </div>
 
-                        <ZoomableImage
-                            id={photo.id}
-                            src={photo.url}
-                            alt={photo.filename}
-                            thumbUrl={photo.thumbUrl}
-                            onSwipeLeft={() => nextId && navigate(nextId)}
-                            onSwipeRight={() => prevId && navigate(prevId)}
+                        {/* Photo Slider */}
+                        <PhotoSlider
+                            idList={idList}
+                            currentIndex={currentIndex}
+                            photos={photos}
+                            onNavigate={setCurrentIndex}
                         />
 
-                        {/* Side Arrows (Desktop) */}
+                        {/* Desktop Side Arrows */}
                         <div className="desktop-only">
-                            {prevId && (
-                                <button
-                                    onClick={() => navigate(prevId)}
-                                    className="nav-arrow-btn"
-                                    style={{ left: "1.5rem" }}
-                                >
+                            {currentIndex > 0 && (
+                                <button onClick={() => navigate('prev')} className="nav-arrow-btn" style={{ left: "1.5rem" }}>
                                     <ChevronLeft size={36} />
                                 </button>
                             )}
-                            {nextId && (
-                                <button
-                                    onClick={() => navigate(nextId)}
-                                    className="nav-arrow-btn"
-                                    style={{ right: "1.5rem" }}
-                                >
+                            {currentIndex < idList.length - 1 && (
+                                <button onClick={() => navigate('next')} className="nav-arrow-btn" style={{ right: "1.5rem" }}>
                                     <ChevronRight size={36} />
                                 </button>
                             )}
                         </div>
                     </div>
 
-                    {/* Desktop Aside (Details) */}
-                    {showInfo && (
+                    {/* Desktop Details Aside */}
+                    {showInfo && photo && (
                         <aside className="photo-viewer-aside desktop-only">
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
                                 <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
                             </div>
-
                             {photo.takenAt && (
                                 <div style={{ marginBottom: "2rem" }}>
                                     <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
                                     <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
                                 </div>
                             )}
-
-                            {/* Camera section */}
                             {(cameraInfo || shootingInfo) && (
-                                <div style={{
-                                    background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                                    padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                                }}>
+                                <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--r-md)", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
                                         <Camera size={20} color="var(--accent)" />
                                         <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
@@ -288,38 +297,22 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                                     {shootingInfo && (
                                         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                                             <Aperture size={18} color="var(--muted)" />
-                                            <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
-                                                {shootingInfo}
-                                            </span>
+                                            <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>{shootingInfo}</span>
                                         </div>
                                     )}
                                 </div>
                             )}
-
-                            {/* GPS */}
                             {photo.gpsLat && photo.gpsLng && (
-                                <div style={{
-                                    background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                                    padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                                }}>
+                                <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--r-md)", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                                         <MapPin size={20} color="var(--success)" />
-                                        <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-                                            {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
-                                        </span>
+                                        <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>{photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}</span>
                                     </div>
                                 </div>
                             )}
-
-                            {/* File info */}
-                            <div style={{
-                                display: "grid", gap: "0.75rem", fontSize: "0.9rem",
-                                color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
-                            }}>
+                            <div style={{ display: "grid", gap: "0.75rem", fontSize: "0.9rem", color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem" }}>
                                 <Row label="Filename" value={photo.filename} />
-                                {photo.width && photo.height && (
-                                    <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
-                                )}
+                                {photo.width && photo.height && <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />}
                                 <Row label="Size" value={formatBytes(photo.sizeBytes)} />
                                 <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
                                 <Row label="Uploaded" value={formatDate(photo.createdAt)} />
@@ -328,32 +321,17 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                     )}
                 </div>
 
-                {/* Mobile Info panel — slides up from bottom */}
-                {showInfo && (
-                    <div className="mobile-only" style={{
-                        position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
-                        overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
-                        padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
-                        borderRadius: "1.5rem 1.5rem 0 0", zIndex: 30,
-                        animation: "slide-up-sheet 300ms cubic-bezier(0.16,1,0.3,1)",
-                        color: "var(--ink)", borderTop: "1px solid var(--line)"
-                    }}>
-                        {/* Header */}
+                {/* Mobile Info Sheet */}
+                {showInfo && photo && (
+                    <div className="mobile-only" style={{ ...sheetStyle }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
                             <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
                             <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "var(--muted)" }}>
                                 <X size={20} />
                             </button>
                         </div>
-
-                        {/* Info rows same as desktop but for mobile sheet */}
                         <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                            {photo.takenAt && (
-                                <div>
-                                    <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>
-                                </div>
-                            )}
-
+                            {photo.takenAt && <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>}
                             {(cameraInfo || shootingInfo) && (
                                 <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
@@ -363,30 +341,22 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                                     {shootingInfo && (
                                         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                             <Aperture size={16} color="var(--muted)" />
-                                            <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
-                                                {shootingInfo}
-                                            </span>
+                                            <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>{shootingInfo}</span>
                                         </div>
                                     )}
                                 </div>
                             )}
-
                             {photo.gpsLat && photo.gpsLng && (
                                 <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                         <MapPin size={18} color="var(--success)" />
-                                        <span style={{ fontSize: "0.9rem" }}>
-                                            {photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}
-                                        </span>
+                                        <span style={{ fontSize: "0.9rem" }}>{photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}</span>
                                     </div>
                                 </div>
                             )}
-
                             <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.5rem" }}>
                                 <Row label="Filename" value={photo.filename} />
-                                {photo.width && photo.height && (
-                                    <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
-                                )}
+                                {photo.width && photo.height && <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />}
                                 <Row label="Size" value={formatBytes(photo.sizeBytes)} />
                                 <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
                                 <Row label="Uploaded" value={formatDate(photo.createdAt)} />
@@ -400,158 +370,184 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-    return (
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--muted)" }}>{label}</span>
-            <span style={{ color: "var(--ink)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
-        </div>
-    );
-}
+const sheetStyle: React.CSSProperties = {
+    position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
+    overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
+    padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
+    borderRadius: "1.5rem 1.5rem 0 0", zIndex: 110,
+    color: "var(--ink)", borderTop: "1px solid var(--line)"
+};
 
-function ZoomableImage({ id, src, alt, thumbUrl, onSwipeLeft, onSwipeRight }: {
-    id: string; src: string; alt: string; thumbUrl: string;
-    onSwipeLeft?: () => void; onSwipeRight?: () => void;
+/* --- Optimized Slider Component --- */
+
+function PhotoSlider({ idList, currentIndex, photos, onNavigate }: {
+    idList: string[];
+    currentIndex: number;
+    photos: Record<string, PhotoDetail>;
+    onNavigate: (index: number) => void;
 }) {
-    const [scale, setScale] = useState(1);
-    const [panning, setPanning] = useState(false);
-    const [pos, setPos] = useState({ x: 0, y: 0 });
-    const [start, setStart] = useState({ x: 0, y: 0 });
-    const [touchStartPos, setTouchStartPos] = useState({ x: 0, y: 0 });
-    const [fullLoaded, setFullLoaded] = useState(false);
-    const [pinchStartDist, setPinchStartDist] = useState<number | null>(null);
-    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+    const [dragX, setDragX] = useState(0);
+    const [isDragging, setIsDragging] = useState(false);
+    const [isAnimating, setIsAnimating] = useState(false);
+
+    // Use refs to avoid stale closures in event handlers
+    const dragXRef = useRef(0);
+    const startXRef = useRef(0);
+    const currentIndexRef = useRef(currentIndex);
+    const idListRef = useRef(idList);
 
     useEffect(() => {
-        let isMounted = true;
-        (async () => {
-            try {
-                // Fetch from Cache API or Network
-                const url = await ImageBlobCache.fetchAndCache(id, src, 'full');
-                if (isMounted) setBlobUrl(url);
-            } catch (err) {
-                console.warn("❌ B2 (Caching failed for single photo, falling back)", err);
-                if (isMounted) setBlobUrl(src);
-            }
-        })();
-        return () => { isMounted = false; };
-    }, [src]);
+        currentIndexRef.current = currentIndex;
+        idListRef.current = idList;
+    }, [currentIndex, idList]);
 
-    const onWheel = (e: React.WheelEvent) => {
-        const delta = e.deltaY;
-        const nextScale = Math.min(Math.max(1, scale - delta / 250), 5); // Faster zoom (was 500)
-        if (nextScale === 1) setPos({ x: 0, y: 0 });
-        setScale(nextScale);
+    const handleStart = (clientX: number) => {
+        startXRef.current = clientX;
+        dragXRef.current = 0;
+        setIsDragging(true);
+        setIsAnimating(false);
     };
 
-    const handleStart = (clientX: number, clientY: number) => {
-        if (scale > 1) {
-            setPanning(true);
-            setStart({ x: clientX - pos.x, y: clientY - pos.y });
-        }
-        setTouchStartPos({ x: clientX, y: clientY });
+    const handleMove = (clientX: number) => {
+        if (!isDragging) return;
+        const delta = clientX - startXRef.current;
+        dragXRef.current = delta;
+        setDragX(delta);
     };
 
-    const handleMove = (clientX: number, clientY: number) => {
-        if (panning) {
-            setPos({ x: clientX - start.x, y: clientY - start.y });
+    const handleEnd = () => {
+        if (!isDragging) return;
+        setIsDragging(false);
+
+        const finalDragX = dragXRef.current;
+        const width = window.innerWidth;
+        const threshold = width / 4;
+
+        if (finalDragX > threshold && currentIndexRef.current > 0) {
+            onNavigate(currentIndexRef.current - 1);
+        } else if (finalDragX < -threshold && currentIndexRef.current < idListRef.current.length - 1) {
+            onNavigate(currentIndexRef.current + 1);
         }
+
+        setDragX(0);
+        setIsAnimating(true);
+        setTimeout(() => setIsAnimating(false), 300);
     };
 
-    const handleEnd = (clientX?: number, clientY?: number) => {
-        setPanning(false);
-        // Swipe Detection (only when not zoomed)
-        if (clientX !== undefined && clientY !== undefined && scale === 1) {
-            const deltaX = clientX - touchStartPos.x;
-            const deltaY = clientY - touchStartPos.y;
-            if (Math.abs(deltaX) > 60 && Math.abs(deltaY) < 40) {
-                if (deltaX > 0) onSwipeRight?.();
-                else onSwipeLeft?.();
-            }
-        }
-    };
+    const renderSlide = (index: number, offset: number) => {
+        const id = idList[index];
+        if (!id) return null;
+        const photo = photos[id];
 
-    // Touch support for pinch-to-zoom
-    const onTouchStart = (e: React.TouchEvent) => {
-        if (e.touches.length === 2) {
-            const dist = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-            setPinchStartDist(dist);
-        } else if (e.touches.length === 1) {
-            handleStart(e.touches[0].clientX, e.touches[0].clientY);
-        }
-    };
-
-    const onTouchMove = (e: React.TouchEvent) => {
-        if (e.touches.length === 2 && pinchStartDist !== null) {
-            const dist = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-            const delta = (dist / pinchStartDist);
-            const zoomPower = 1.1; // Boost zoom speed
-            const nextScale = Math.min(Math.max(1, scale * Math.pow(delta, zoomPower)), 5);
-            setScale(nextScale);
-            setPinchStartDist(dist);
-        } else if (e.touches.length === 1) {
-            handleMove(e.touches[0].clientX, e.touches[0].clientY);
-        }
-    };
-
-    const toggleZoom = () => {
-        if (scale > 1) {
-            setScale(1);
-            setPos({ x: 0, y: 0 });
-        } else {
-            setScale(2.5);
-        }
+        return (
+            <div key={id} style={{
+                position: "absolute",
+                top: 0, left: 0, width: "100%", height: "100%",
+                transform: `translateX(${(offset * 100) + (dragX / window.innerWidth * 100)}%)`,
+                transition: isDragging || !isAnimating ? "none" : "transform 300ms cubic-bezier(0.2, 0, 0, 1)",
+                display: "flex", alignItems: "center", justifyContent: "center"
+            }}>
+                {photo ? (
+                    <ZoomableImage
+                        id={photo.id} src={photo.url}
+                        thumbUrl={photo.thumbUrl}
+                        alt={photo.filename}
+                        isCurrent={offset === 0}
+                    />
+                ) : (
+                    <Loader className="spin" color="#fff" />
+                )}
+            </div>
+        );
     };
 
     return (
         <div
-            style={{
-                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                overflow: "hidden", position: "relative", width: "100%", height: "100%",
-                touchAction: "none", cursor: scale > 1 ? "grab" : "default"
+            style={{ width: "100%", height: "100%", position: "relative", touchAction: "none" }}
+            onMouseDown={(e) => {
+                handleStart(e.clientX);
+                const onMouseMove = (me: MouseEvent) => handleMove(me.clientX);
+                const onMouseUp = () => {
+                    handleEnd();
+                    window.removeEventListener('mousemove', onMouseMove);
+                    window.removeEventListener('mouseup', onMouseUp);
+                };
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
             }}
-            onWheel={onWheel}
-            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
-            onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
-            onMouseUp={(e) => handleEnd(e.clientX, e.clientY)}
-            onMouseLeave={() => handleEnd()}
-            onTouchStart={onTouchStart}
-            onTouchMove={onTouchMove}
-            onTouchEnd={(e) => {
-                const touch = e.changedTouches[0];
-                handleEnd(touch?.clientX, touch?.clientY);
+            onTouchStart={(e) => {
+                handleStart(e.touches[0].clientX);
             }}
-            onDoubleClick={toggleZoom}
+            onTouchMove={(e) => {
+                handleMove(e.touches[0].clientX);
+                if (Math.abs(dragXRef.current) > 10) {
+                    if (e.cancelable) e.preventDefault();
+                }
+            }}
+            onTouchEnd={handleEnd}
         >
+            {renderSlide(currentIndex - 1, -1)}
+            {renderSlide(currentIndex, 0)}
+            {renderSlide(currentIndex + 1, 1)}
+        </div>
+    );
+}
+
+function ZoomableImage({ id, src, thumbUrl, alt, isCurrent }: {
+    id: string; src: string; thumbUrl: string; alt: string; isCurrent: boolean;
+}) {
+    const [scale, setScale] = useState(1);
+    const [fullLoaded, setFullLoaded] = useState(false);
+    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+    useEffect(() => { if (!isCurrent) setScale(1); }, [isCurrent]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const signal = controller.signal;
+
+        (async () => {
+            try {
+                const url = await ImageBlobCache.fetchAndCache(id, src, 'full', signal);
+                setBlobUrl(url);
+            } catch (err: any) {
+                if (err.name === 'AbortError') return;
+                console.warn("❌ Cache/Fetch failure, falling back to src", err);
+                setBlobUrl(src);
+            }
+        })();
+        return () => controller.abort();
+    }, [id, src]);
+
+    return (
+        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
             {!fullLoaded && (
                 <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-                    <img src={thumbUrl} alt="" style={{
-                        position: "absolute", width: "100%", height: "100%",
-                        objectFit: "contain", filter: "blur(20px)", transform: `scale(${scale * 1.1}) translate(${pos.x}px, ${pos.y}px)`,
-                    }} />
+                    <img src={thumbUrl} alt="" style={{ position: "absolute", width: "100%", height: "100%", objectFit: "contain", filter: "blur(20px)" }} />
                     <div className="shimmer" style={{ position: "absolute", inset: 0, zIndex: 1, opacity: 0.2 }} />
                 </div>
             )}
             <img
-                src={blobUrl || src}
-                alt={alt}
+                src={blobUrl || src} alt={alt}
                 onLoad={() => setFullLoaded(true)}
                 draggable={false}
                 style={{
                     maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
                     opacity: fullLoaded ? 1 : 0,
-                    transition: panning ? "none" : "transform 150ms cubic-bezier(0.2, 0, 0.2, 1), opacity 500ms ease",
-                    transform: `scale(${scale}) translate(${pos.x / scale}px, ${pos.y / scale}px)`,
-                    position: "relative", zIndex: 1,
-                    userSelect: "none"
+                    transform: `scale(${scale})`,
+                    transition: "transform 200ms ease, opacity 300ms ease",
+                    zIndex: 1, userSelect: "none"
                 }}
             />
+        </div>
+    );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+    return (
+        <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "var(--muted)" }}>{label}</span>
+            <span style={{ color: "var(--ink)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
         </div>
     );
 }
