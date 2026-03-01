@@ -18,9 +18,11 @@ export async function GET(
             .single();
 
         if (error || !photo) {
+            console.warn(`[API-SingleFetch] Photo ${id} not found.`);
             return NextResponse.json({ error: "Photo not found" }, { status: 404 });
         }
 
+        console.info(`[API-SingleFetch] Photo ${id} found. Triggering B2 signing...`);
         const url = await getReadUrl(photo.original_key, 7200);
         const thumbUrl = photo.thumb_key ? await getReadUrl(photo.thumb_key) : url;
 

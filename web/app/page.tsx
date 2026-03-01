@@ -7,18 +7,8 @@ import {
     Upload, Image, Loader, RefreshCw, Trash2, X, CheckCircle, Heart, FolderPlus, Plus,
 } from "lucide-react";
 import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
-
-type Photo = {
-    id: string;
-    url: string;
-    thumbUrl: string;
-    filename: string;
-    mimeType: string;
-    sizeBytes: number;
-    isLiked: boolean;
-    takenAt: string | null;
-    createdAt: string;
-};
+import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
+import { CachedImage } from "@/components/CachedImage";
 
 const PAGE_SIZE = 40;
 
@@ -46,17 +36,57 @@ export default function HomePage() {
         if (offset === 0) setLoading(true);
         else setLoadingMore(true);
         setError(null);
+
         try {
+            // Smart Refresh: Only fetch from network if there's a change or cache is missing
+            if (offset === 0) {
+                const cached = PhotoMetadataCache.get(0);
+                const localHash = PhotoMetadataCache.getMetadataHash();
+
+                if (cached && localHash) {
+                    // Check top 40 IDs hash from DB
+                    try {
+                        const checkRes = await fetch("/api/photos?check_latest=true");
+                        if (checkRes.ok) {
+                            const { hash: remoteHash } = await checkRes.json();
+                            if (remoteHash === localHash) {
+                                console.log("[Cache] Smart Refresh: Cache is up to date (hash match).");
+                                setPhotos(cached);
+                                setHasMore(cached.length === PAGE_SIZE);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("[Cache] Check latest failed, falling back to network:", e);
+                    }
+                }
+            } else {
+                // For offset > 0, check if we have it in cache
+                const cached = PhotoMetadataCache.get(offset);
+                if (cached) {
+                    console.log(`[Cache] Loading offset ${offset} from cache.`);
+                    setPhotos((prev) => [...prev, ...cached]);
+                    setHasMore(cached.length === PAGE_SIZE);
+                    return;
+                }
+            }
+
+            // Normal network fetch
+            console.info(`[B2-Signing] Fetching fresh metadata from API... (${offset === 0 ? "First Page" : "Offset " + offset})`);
             const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Failed to fetch photos");
             const data = await res.json();
             const newPhotos: Photo[] = data.photos || [];
+
             if (append) {
                 setPhotos((prev) => [...prev, ...newPhotos]);
             } else {
                 setPhotos(newPhotos);
             }
+
+            // Save to cache (async hashing)
+            await PhotoMetadataCache.set(offset, newPhotos);
             setHasMore(newPhotos.length === PAGE_SIZE);
         } catch (err) {
             setError(String(err));
@@ -278,10 +308,12 @@ export default function HomePage() {
                                     onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
                                     onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
                                 >
-                                    <img src={photo.thumbUrl || photo.url} alt="" loading="lazy" style={{
-                                        width: "100%", height: "100%", objectFit: "cover", display: "block",
-                                        opacity: isSelected ? 0.6 : 1, transition: "opacity 150ms",
-                                    }} />
+                                    <CachedImage
+                                        src={photo.thumbUrl || photo.url}
+                                        alt=""
+                                        className="w-full h-full object-cover block transition-opacity duration-150"
+                                        style={{ opacity: isSelected ? 0.6 : 1 }}
+                                    />
                                     {photo.isLiked && !selectMode && (
                                         <Heart size={16} fill="#ff4d6a" color="#ff4d6a" style={{ position: "absolute", bottom: 8, right: 8 }} />
                                     )}

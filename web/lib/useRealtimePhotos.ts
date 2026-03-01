@@ -1,18 +1,7 @@
 import { useEffect, useRef } from "react";
 import { getSupabaseBrowser } from "./supabase-browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-
-type Photo = {
-    id: string;
-    url: string;
-    thumbUrl: string;
-    filename: string;
-    mimeType: string;
-    sizeBytes: number;
-    isLiked: boolean;
-    takenAt: string | null;
-    createdAt: string;
-};
+import { PhotoMetadataCache, type Photo } from "./photo-cache";
 
 type UseRealtimePhotosOptions = {
     /** Current photos state */
@@ -31,6 +20,12 @@ type UseRealtimePhotosOptions = {
  */
 export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseRealtimePhotosOptions) {
     const channelRef = useRef<RealtimeChannel | null>(null);
+    const photosRef = useRef<Photo[]>(photos);
+
+    // Keep photosRef in sync with the latest prop
+    useEffect(() => {
+        photosRef.current = photos;
+    }, [photos]);
 
     useEffect(() => {
         if (!enabled) return;
@@ -44,26 +39,29 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                 { event: "INSERT", schema: "public", table: "photos" },
                 async (payload) => {
                     const row = payload.new as any;
-                    // Skip if already soft-deleted
                     if (row.is_deleted) return;
 
                     try {
-                        // Fetch the full photo with signed URLs from the API
                         const res = await fetch(`/api/photos/${row.id}`);
                         if (!res.ok) return;
                         const { photo } = await res.json();
                         if (!photo) return;
 
                         setPhotos((prev) => {
-                            // Avoid duplicates
                             if (prev.some((p) => p.id === photo.id)) return prev;
                             return [photo, ...prev];
                         });
+
+                        // Update cache using the latest ref content
+                        if (PhotoMetadataCache.get(0)) {
+                            PhotoMetadataCache.set(0, [photo, ...photosRef.current].slice(0, 40));
+                        }
                     } catch (err) {
                         console.error("[Realtime] Failed to fetch new photo:", err);
                     }
                 },
             )
+            // ... [rest of the component] ...
             .on(
                 "postgres_changes",
                 { event: "UPDATE", schema: "public", table: "photos" },
@@ -77,11 +75,15 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                     }
 
                     // Update in-place (e.g. is_liked toggle)
-                    setPhotos((prev) =>
-                        prev.map((p) =>
+                    setPhotos((prev) => {
+                        const next = prev.map((p) =>
                             p.id === row.id ? { ...p, isLiked: row.is_liked ?? p.isLiked } : p,
-                        ),
-                    );
+                        );
+                        // Update cache for any photo updated
+                        const updated = next.find(p => p.id === row.id);
+                        if (updated) PhotoMetadataCache.updatePhoto(updated);
+                        return next;
+                    });
                 },
             )
             .on(
@@ -89,7 +91,12 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                 { event: "DELETE", schema: "public", table: "photos" },
                 (payload) => {
                     const row = payload.old as any;
-                    setPhotos((prev) => prev.filter((p) => p.id !== row.id));
+                    setPhotos((prev) => {
+                        const next = prev.filter((p) => p.id !== row.id);
+                        // Clear cache on delete to be safe, or we could update specifically
+                        PhotoMetadataCache.clear();
+                        return next;
+                    });
                 },
             )
             .subscribe((status) => {
