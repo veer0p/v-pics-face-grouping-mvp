@@ -3,6 +3,8 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getClient, getBucket } from "@/lib/b2";
 
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
