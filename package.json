@@ -12,5 +12,8 @@
     },
     "dependencies": {
         "framer-motion": "^12.34.3"
+    },
+    "devDependencies": {
+        "next": "16.1.6"
     }
 }

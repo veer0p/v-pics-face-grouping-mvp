@@ -384,7 +384,14 @@ export const ImageBlobCache = {
 
         // 2. Fetch from network
         console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
-        const res = await fetch(url);
+
+        let fetchUrl = url;
+        // If it's a B2 URL, route through our proxy to bypass CORS
+        if (url.includes('backblazeb2.com')) {
+            fetchUrl = `/api/photos/proxy?url=${encodeURIComponent(url)}`;
+        }
+
+        const res = await fetch(fetchUrl);
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
         const blob = await res.blob();
 
