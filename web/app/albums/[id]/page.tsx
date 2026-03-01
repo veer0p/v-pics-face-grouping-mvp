@@ -5,8 +5,9 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft, MoreVertical, Plus, Image as ImageIcon,
-    Loader, Trash2, Edit3, X, CheckCircle
+    Loader, Trash2, Edit3, X, CheckCircle, Search
 } from "lucide-react";
+import { BottomSheet } from "@/components/BottomSheet";
 
 type Album = {
     id: string;
@@ -32,6 +33,7 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
     const [loading, setLoading] = useState(true);
     const [deleting, setDeleting] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
+    const [showPhotoPicker, setShowPhotoPicker] = useState(false);
 
     const fetchDetail = async () => {
         setLoading(true);
@@ -173,10 +175,21 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                     borderRadius: "var(--r-pill)", padding: "0.65rem 1.25rem",
                     boxShadow: "0 8px 24px rgba(91,78,255,0.35)",
                     display: "flex", alignItems: "center", gap: "0.4rem",
-                }} onClick={() => router.push("/")}>
+                }} onClick={() => setShowPhotoPicker(true)}>
                     <Plus size={16} strokeWidth={2.5} /> Add Photos
                 </button>
             </div>
+
+            <BottomSheet open={showPhotoPicker} onClose={() => setShowPhotoPicker(false)} title="Select from library">
+                <PhotoPicker
+                    albumId={id}
+                    onClose={() => setShowPhotoPicker(false)}
+                    onAdded={() => {
+                        setShowPhotoPicker(false);
+                        fetchDetail();
+                    }}
+                />
+            </BottomSheet>
 
             <style jsx>{`
                 .menu-item {
@@ -198,6 +211,103 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                     background: var(--bg-subtle);
                 }
             `}</style>
+        </div>
+    );
+}
+
+function PhotoPicker({ albumId, onAdded, onClose }: { albumId: string, onAdded: () => void, onClose: () => void }) {
+    const [photos, setPhotos] = useState<Photo[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [selected, setSelected] = useState<Set<string>>(new Set());
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        async function fetchLibrary() {
+            try {
+                const res = await fetch('/api/photos?limit=100');
+                const data = await res.json();
+                setPhotos(data.photos || []);
+            } catch (err) {
+                console.error(err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchLibrary();
+    }, []);
+
+    const toggleSelect = (id: string) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            next.has(id) ? next.delete(id) : next.add(id);
+            return next;
+        });
+    };
+
+    const handleAdd = async () => {
+        if (selected.size === 0 || saving) return;
+        setSaving(true);
+        try {
+            const res = await fetch(`/api/albums/${albumId}/add`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ photoIds: Array.from(selected) }),
+            });
+            if (res.ok) onAdded();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div style={{ display: "flex", flexDirection: "column", height: "70vh" }}>
+            <div style={{ flex: 1, overflowY: "auto", padding: "0.5rem" }}>
+                {loading ? (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 200 }}>
+                        <Loader size={24} className="spin" color="var(--accent)" />
+                    </div>
+                ) : (
+                    <div className="responsive-grid" style={{ gap: "4px" }}>
+                        {photos.map((p) => {
+                            const isSelected = selected.has(p.id);
+                            return (
+                                <div key={p.id} className="press-scale" style={{
+                                    aspectRatio: "1", background: "var(--bg-subtle)", position: "relative",
+                                    borderRadius: 'var(--r-sm)', overflow: 'hidden', cursor: "pointer"
+                                }} onClick={() => toggleSelect(p.id)}>
+                                    <img src={p.thumbUrl} alt="" style={{
+                                        width: "100%", height: "100%", objectFit: "cover",
+                                        opacity: isSelected ? 0.6 : 1, transition: "opacity 150ms"
+                                    }} />
+                                    {isSelected && (
+                                        <div style={{
+                                            position: "absolute", top: 8, right: 8, width: 20, height: 20,
+                                            borderRadius: "50%", background: "var(--accent)",
+                                            display: "flex", alignItems: "center", justifyContent: "center",
+                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+                                        }}>
+                                            <CheckCircle size={14} color="#fff" strokeWidth={3} />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            <div style={{
+                padding: "1rem", borderTop: "1px solid var(--line)",
+                display: "flex", gap: "1rem", background: "var(--bg-elevated)"
+            }}>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+                <button className="btn btn-primary" style={{ flex: 2 }}
+                    onClick={handleAdd} disabled={selected.size === 0 || saving}>
+                    {saving ? <Loader size={18} className="spin" /> : `Add ${selected.size} Photos`}
+                </button>
+            </div>
         </div>
     );
 }

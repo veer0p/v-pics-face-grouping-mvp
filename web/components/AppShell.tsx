@@ -7,8 +7,11 @@ import { BottomNav } from "@/components/BottomNav";
 import { Sidebar } from "@/components/Sidebar";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatrixBackground } from "@/components/MatrixBackground";
+import { PookieBackground } from "@/components/PookieBackground";
+import { useTheme } from "./ThemeProvider";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+    const { resolved } = useTheme();
     const pathname = usePathname();
     const router = useRouter();
     const [scrolled, setScrolled] = useState(false);
@@ -31,7 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="app-shell">
-            <MatrixBackground />
+            {resolved === "dark" ? <MatrixBackground /> : <PookieBackground />}
 
             {showSidebar && <Sidebar />}
 

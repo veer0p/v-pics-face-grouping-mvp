@@ -53,7 +53,6 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     const [error, setError] = useState(false);
     const [liked, setLiked] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
-    const [fullLoaded, setFullLoaded] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -166,7 +165,6 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
             <div className="photo-viewer-container">
                 {/* Main Content (Image) */}
                 <div className="photo-viewer-main">
-                    {/* Top bar (Floating on mobile, potentially integrated on desktop) */}
                     <div style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                         padding: "0.85rem 1rem",
@@ -194,28 +192,11 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                         </div>
                     </div>
 
-                    {/* Full-res image with blur-up */}
-                    <div style={{
-                        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                        overflow: "hidden", position: "relative", width: "100%", height: "100%"
-                    }}>
-                        {!fullLoaded && (
-                            <img src={photo.thumbUrl} alt="" style={{
-                                position: "absolute", width: "100%", height: "100%",
-                                objectFit: "contain", filter: "blur(20px)", transform: "scale(1.1)",
-                            }} />
-                        )}
-                        <img
-                            src={photo.url}
-                            alt={photo.filename}
-                            onLoad={() => setFullLoaded(true)}
-                            style={{
-                                maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
-                                opacity: fullLoaded ? 1 : 0, transition: "opacity 500ms ease",
-                                position: "relative", zIndex: 1,
-                            }}
-                        />
-                    </div>
+                    <ZoomableImage
+                        src={photo.url}
+                        alt={photo.filename}
+                        thumbUrl={photo.thumbUrl}
+                    />
                 </div>
 
                 {/* Desktop Aside (Details) */}
@@ -358,6 +339,115 @@ function Row({ label, value }: { label: string; value: string }) {
         <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ color: "rgba(255,255,255,0.45)" }}>{label}</span>
             <span style={{ color: "rgba(255,255,255,0.8)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
+        </div>
+    );
+}
+
+function ZoomableImage({ src, alt, thumbUrl }: { src: string; alt: string; thumbUrl: string }) {
+    const [scale, setScale] = useState(1);
+    const [panning, setPanning] = useState(false);
+    const [pos, setPos] = useState({ x: 0, y: 0 });
+    const [start, setStart] = useState({ x: 0, y: 0 });
+    const [fullLoaded, setFullLoaded] = useState(false);
+    const [pinchStartDist, setPinchStartDist] = useState<number | null>(null);
+
+    const onWheel = (e: React.WheelEvent) => {
+        const delta = e.deltaY;
+        const nextScale = Math.min(Math.max(1, scale - delta / 250), 5); // Faster zoom (was 500)
+        if (nextScale === 1) setPos({ x: 0, y: 0 });
+        setScale(nextScale);
+    };
+
+    const handleStart = (clientX: number, clientY: number) => {
+        if (scale > 1) {
+            setPanning(true);
+            setStart({ x: clientX - pos.x, y: clientY - pos.y });
+        }
+    };
+
+    const handleMove = (clientX: number, clientY: number) => {
+        if (panning) {
+            setPos({ x: clientX - start.x, y: clientY - start.y });
+        }
+    };
+
+    const handleEnd = () => setPanning(false);
+
+    // Touch support for pinch-to-zoom
+    const onTouchStart = (e: React.TouchEvent) => {
+        if (e.touches.length === 2) {
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            setPinchStartDist(dist);
+        } else if (e.touches.length === 1) {
+            handleStart(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    };
+
+    const onTouchMove = (e: React.TouchEvent) => {
+        if (e.touches.length === 2 && pinchStartDist !== null) {
+            const dist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            const delta = (dist / pinchStartDist);
+            const zoomPower = 1.1; // Boost zoom speed
+            const nextScale = Math.min(Math.max(1, scale * Math.pow(delta, zoomPower)), 5);
+            setScale(nextScale);
+            setPinchStartDist(dist);
+        } else if (e.touches.length === 1) {
+            handleMove(e.touches[0].clientX, e.touches[0].clientY);
+        }
+    };
+
+    const toggleZoom = () => {
+        if (scale > 1) {
+            setScale(1);
+            setPos({ x: 0, y: 0 });
+        } else {
+            setScale(2.5);
+        }
+    };
+
+    return (
+        <div
+            style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                overflow: "hidden", position: "relative", width: "100%", height: "100%",
+                touchAction: "none", cursor: scale > 1 ? "grab" : "default"
+            }}
+            onWheel={onWheel}
+            onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
+            onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
+            onMouseUp={handleEnd}
+            onMouseLeave={handleEnd}
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={handleEnd}
+            onDoubleClick={toggleZoom}
+        >
+            {!fullLoaded && (
+                <img src={thumbUrl} alt="" style={{
+                    position: "absolute", width: "100%", height: "100%",
+                    objectFit: "contain", filter: "blur(20px)", transform: `scale(${scale * 1.1}) translate(${pos.x}px, ${pos.y}px)`,
+                }} />
+            )}
+            <img
+                src={src}
+                alt={alt}
+                onLoad={() => setFullLoaded(true)}
+                draggable={false}
+                style={{
+                    maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+                    opacity: fullLoaded ? 1 : 0,
+                    transition: panning ? "none" : "transform 150ms cubic-bezier(0.2, 0, 0.2, 1), opacity 500ms ease",
+                    transform: `scale(${scale}) translate(${pos.x / scale}px, ${pos.y / scale}px)`,
+                    position: "relative", zIndex: 1,
+                    userSelect: "none"
+                }}
+            />
         </div>
     );
 }

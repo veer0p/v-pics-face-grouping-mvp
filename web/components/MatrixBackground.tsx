@@ -1,5 +1,4 @@
 "use client";
-
 import React, { useEffect, useRef } from 'react';
 
 export const MatrixBackground: React.FC = () => {
