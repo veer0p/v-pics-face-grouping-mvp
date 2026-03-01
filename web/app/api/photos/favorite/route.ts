@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 
 // Toggle liked
 export async function POST(req: NextRequest) {
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { id, liked } = await req.json();
         if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
         const supabase = createServiceClient();
+
         const { error } = await supabase
             .from("photos")
             .update({ is_liked: !!liked })

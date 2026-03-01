@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { getReadUrl } from "@/lib/b2";
 
 export async function GET(
@@ -7,6 +7,9 @@ export async function GET(
     { params }: { params: Promise<{ id: string }> },
 ) {
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { id } = await params;
         const supabase = createServiceClient();
 
@@ -18,11 +21,11 @@ export async function GET(
             .single();
 
         if (error || !photo) {
-            console.warn(`[API-SingleFetch] Photo ${id} not found.`);
+            console.warn(`❌ B2 (Not found: ${id})`);
             return NextResponse.json({ error: "Photo not found" }, { status: 404 });
         }
 
-        console.info(`[API-SingleFetch] Photo ${id} found. Triggering B2 signing...`);
+        console.log(`❌ B2 (Signing single photo: ${id})`);
         const url = await getReadUrl(photo.original_key, 7200);
         const thumbUrl = photo.thumb_key ? await getReadUrl(photo.thumb_key) : url;
 

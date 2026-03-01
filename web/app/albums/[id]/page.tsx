@@ -159,11 +159,13 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                                 borderRadius: 'var(--r-sm)', overflow: 'hidden'
                             }} onClick={() => router.push(`/photo/${p.id}`)}>
                                 <CachedImage
+                                    id={p.id}
                                     src={p.thumbUrl || p.url}
                                     alt={p.filename}
                                     style={{
                                         width: "100%", height: "100%", objectFit: "cover",
                                     }}
+                                    category="thumb"
                                 />
                             </div>
                         ))}
@@ -283,12 +285,14 @@ function PhotoPicker({ albumId, onAdded, onClose }: { albumId: string, onAdded: 
                                     borderRadius: 'var(--r-sm)', overflow: 'hidden', cursor: "pointer"
                                 }} onClick={() => toggleSelect(p.id)}>
                                     <CachedImage
+                                        id={p.id}
                                         src={p.thumbUrl || p.url}
                                         alt=""
                                         style={{
                                             width: "100%", height: "100%", objectFit: "cover",
                                             opacity: isSelected ? 1 : 0.4, transition: "opacity 150ms"
                                         }}
+                                        category="thumb"
                                     />
                                     <div style={{
                                         position: "absolute", top: 8, right: 8, width: 22, height: 22,

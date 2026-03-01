@@ -1,43 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { getReadUrl } from "@/lib/b2";
 
 export async function GET(req: NextRequest) {
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const supabase = createServiceClient();
         const url = new URL(req.url);
         const limit = Math.min(Number(url.searchParams.get("limit") || 100), 200);
         const offset = Number(url.searchParams.get("offset") || 0);
-        const checkLatest = url.searchParams.get("check_latest") === "true";
+        const clientHash = url.searchParams.get("hash");
 
-        if (checkLatest) {
-            // Fetch top 40 IDs to create a robust hash
-            const { data: latestIds, error, count } = await supabase
-                .from("photos")
-                .select("id", { count: "exact" })
-                .eq("is_deleted", false)
-                .order("taken_at", { ascending: false, nullsFirst: true })
-                .order("created_at", { ascending: false })
-                .limit(40);
+        // Smart Caching: Use the server-side photo_hash from the user record
+        // This avoids recalculating hashes on every request.
+        const photoHash = (user as any).photo_hash;
 
-            if (error) {
-                console.error("Check latest error:", error);
-                return NextResponse.json({ error: "Database error" }, { status: 500 });
-            }
-
-            const ids = (latestIds || []).map(img => img.id).join(",");
-            const crypto = await import("node:crypto");
-            const hash = crypto.createHash("sha256").update(ids).digest("hex");
-
-            console.log(`[API-SmartRefresh] Hash Check: hash=${hash.slice(0, 8)}... total=${count}. (Zero B2 signing performed)`);
-
-            return NextResponse.json({
-                hash,
-                total: count
-            });
+        if (clientHash && clientHash === photoHash) {
+            console.log(`✅ Cached (Hash matched: ${photoHash.slice(0, 8)}...)`);
+            return NextResponse.json({ match: true, hash: photoHash });
         }
 
-        console.warn(`[API-FullFetch] Offset=${offset} Limit=${limit}. Triggering B2 signing for ${limit} photos.`);
+        console.log(`❌ B2 (Full fetch triggered)`);
 
         const { data: images, error, count } = await supabase
             .from("photos")
@@ -53,7 +38,7 @@ export async function GET(req: NextRequest) {
         }
 
         const photos = await Promise.all(
-            (images || []).map(async (img) => ({
+            ((images as any[]) || []).map(async (img) => ({
                 id: img.id,
                 url: await getReadUrl(img.original_key),
                 thumbUrl: img.thumb_key ? await getReadUrl(img.thumb_key) : await getReadUrl(img.original_key),
@@ -71,7 +56,7 @@ export async function GET(req: NextRequest) {
         );
 
         console.info(`[API-Success] Returned ${photos.length} photos with presigned B2 URLs.`);
-        return NextResponse.json({ photos, total: count });
+        return NextResponse.json({ photos, total: count, hash: photoHash });
     } catch (err) {
         console.error("Photos fetch error:", err);
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });

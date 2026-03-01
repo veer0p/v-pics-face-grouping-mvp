@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { ACCENT_PALETTES } from "@/lib/palettes";
+import { useAuth } from "@/components/AuthContext";
 
 type ToggleProps = { on: boolean; onChange: (v: boolean) => void };
 function Toggle({ on, onChange }: ToggleProps) {
@@ -24,12 +25,18 @@ function Toggle({ on, onChange }: ToggleProps) {
 
 type SettingRowProps = { icon: React.ReactNode; label: string; right?: React.ReactNode; onClick?: () => void };
 function SettingRow({ icon, label, right, onClick }: SettingRowProps) {
+    const Component = onClick ? "button" : "div";
     return (
-        <button className="setting-row" onClick={onClick} type="button">
+        <Component
+            className="setting-row"
+            onClick={onClick}
+            type={onClick ? "button" : undefined}
+            style={!onClick ? { cursor: 'default' } : undefined}
+        >
             <span className="setting-row-icon">{icon}</span>
             <span className="setting-row-label">{label}</span>
             <span className="setting-row-right">{right ?? <ChevronRight size={16} color="var(--muted-2)" />}</span>
-        </button>
+        </Component>
     );
 }
 
@@ -44,6 +51,7 @@ type Stats = { totalPhotos: number; totalBytes: number; trashCount: number; tras
 
 export default function SettingsPage() {
     const router = useRouter();
+    const { user, signOut } = useAuth();
     const { theme, setTheme, resolved, accentIndex, setAccentIndex } = useTheme();
     const [faceRecog, setFaceRecog] = useState(true);
     const [locationOn, setLocationOn] = useState(true);
@@ -78,7 +86,7 @@ export default function SettingsPage() {
                             <User size={28} color="#fff" strokeWidth={2} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontWeight: 700, fontSize: "1.1rem" }}>Guest User</p>
+                            <p style={{ fontWeight: 700, fontSize: "1.1rem" }}>{user?.full_name || "Guest User"}</p>
                             <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
                                 {stats ? `${stats.totalPhotos} photos • ${stats.favoriteCount} favorites` : "Loading…"}
                             </p>
@@ -184,7 +192,10 @@ export default function SettingsPage() {
                     </div>
 
                     <button className="btn btn-danger" style={{ width: "100%", marginTop: "1rem", padding: '1rem' }}
-                        onClick={() => { }}>
+                        onClick={async () => {
+                            await signOut();
+                            router.replace("/login");
+                        }}>
                         <LogOut size={18} strokeWidth={2} /> Sign Out
                     </button>
                 </div>

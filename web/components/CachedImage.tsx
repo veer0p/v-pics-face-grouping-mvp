@@ -8,14 +8,16 @@ import { ImageBlobCache } from "@/lib/photo-cache";
 import { Loader } from "lucide-react";
 
 type CachedImageProps = {
+    id: string;
     src: string;
     alt: string;
     className?: string;
     style?: React.CSSProperties;
     loading?: "lazy" | "eager";
+    category?: 'thumb' | 'full';
 };
 
-export function CachedImage({ src, alt, className, style, loading = "lazy" }: CachedImageProps) {
+export function CachedImage({ id, src, alt, className, style, loading = "lazy", category = 'full' }: CachedImageProps) {
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
     const [error, setError] = useState(false);
 
@@ -24,7 +26,7 @@ export function CachedImage({ src, alt, className, style, loading = "lazy" }: Ca
 
         async function loadImage() {
             try {
-                const url = await ImageBlobCache.fetchAndCache(src);
+                const url = await ImageBlobCache.fetchAndCache(id, src, category);
                 if (isMounted) setBlobUrl(url);
             } catch (err) {
                 console.warn("[CachedImage] Caching failed, falling back to network direct.", err);

@@ -7,6 +7,7 @@ import {
     ArrowLeft, Heart, Trash2, Download, Info, Loader, X,
     Camera, Aperture, MapPin,
 } from "lucide-react";
+import { ImageBlobCache } from "@/lib/photo-cache";
 
 type PhotoDetail = {
     id: string;
@@ -194,6 +195,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                     </div>
 
                     <ZoomableImage
+                        id={photo.id}
                         src={photo.url}
                         alt={photo.filename}
                         thumbUrl={photo.thumbUrl}
@@ -346,13 +348,29 @@ function Row({ label, value }: { label: string; value: string }) {
     );
 }
 
-function ZoomableImage({ src, alt, thumbUrl }: { src: string; alt: string; thumbUrl: string }) {
+function ZoomableImage({ id, src, alt, thumbUrl }: { id: string; src: string; alt: string; thumbUrl: string }) {
     const [scale, setScale] = useState(1);
     const [panning, setPanning] = useState(false);
     const [pos, setPos] = useState({ x: 0, y: 0 });
     const [start, setStart] = useState({ x: 0, y: 0 });
     const [fullLoaded, setFullLoaded] = useState(false);
     const [pinchStartDist, setPinchStartDist] = useState<number | null>(null);
+    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+        (async () => {
+            try {
+                // Fetch from Cache API or Network
+                const url = await ImageBlobCache.fetchAndCache(id, src, 'full');
+                if (isMounted) setBlobUrl(url);
+            } catch (err) {
+                console.warn("❌ B2 (Caching failed for single photo, falling back)", err);
+                if (isMounted) setBlobUrl(src);
+            }
+        })();
+        return () => { isMounted = false; };
+    }, [src]);
 
     const onWheel = (e: React.WheelEvent) => {
         const delta = e.deltaY;
@@ -438,7 +456,7 @@ function ZoomableImage({ src, alt, thumbUrl }: { src: string; alt: string; thumb
                 }} />
             )}
             <img
-                src={src}
+                src={blobUrl || src}
                 alt={alt}
                 onLoad={() => setFullLoaded(true)}
                 draggable={false}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getClient, getBucket } from "@/lib/b2";
 
@@ -7,6 +7,11 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const supabase = createServiceClient();
+
         const body = await req.json();
         const ids: string[] = body.ids;
         const permanent: boolean = body.permanent === true;
@@ -16,8 +21,6 @@ export async function POST(req: NextRequest) {
         if (!ids || !Array.isArray(ids) || ids.length === 0) {
             return NextResponse.json({ error: "No ids provided" }, { status: 400 });
         }
-
-        const supabase = createServiceClient();
 
         if (permanent) {
             console.log("[Delete API] Starting permanent deletion...");

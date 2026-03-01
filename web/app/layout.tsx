@@ -3,6 +3,7 @@ import { DM_Sans, Fraunces } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/AppShell";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { AuthProvider } from "@/components/AuthContext";
 
 const dmSans = DM_Sans({
     variable: "--font-dm-sans",
@@ -47,9 +48,11 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body className={`${dmSans.variable} ${fraunces.variable}`}
                 style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}>
-                <ThemeProvider>
-                    <AppShell>{children}</AppShell>
-                </ThemeProvider>
+                <AuthProvider>
+                    <ThemeProvider>
+                        <AppShell>{children}</AppShell>
+                    </ThemeProvider>
+                </AuthProvider>
             </body>
         </html>
     );

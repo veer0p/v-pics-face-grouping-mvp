@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Heart, Settings } from "lucide-react";
+import { Search, Settings, LogOut, Heart } from "lucide-react";
+import { useAuth } from "@/components/AuthContext";
 import { BottomNav } from "@/components/BottomNav";
 import { FloatingUploadButton } from "@/components/FloatingUploadButton";
 import { Sidebar } from "@/components/Sidebar";
@@ -13,6 +14,7 @@ import { useTheme } from "./ThemeProvider";
 import { ACCENT_PALETTES } from "@/lib/palettes";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+    const { user, signOut } = useAuth();
     const { resolved, accentIndex } = useTheme();
     const activePalette = ACCENT_PALETTES[resolved][accentIndex] || ACCENT_PALETTES[resolved][0];
     const pathname = usePathname();
@@ -28,6 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
     const [scrolled, setScrolled] = useState(false);
     const [hidden, setHidden] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
     const lastScrollY = useRef(0);
 
     useEffect(() => {
@@ -41,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return () => window.removeEventListener("scroll", onScroll);
     }, []);
 
-    const hideHeader = pathname.startsWith("/photo/") || pathname.startsWith("/edit/") || pathname === "/welcome";
+    const hideHeader = pathname.startsWith("/photo/") || pathname.startsWith("/edit/") || pathname === "/welcome" || pathname === "/login";
     const showSidebar = !hideHeader;
 
     return (
@@ -78,10 +81,61 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             <Settings size={20} strokeWidth={2} />
                         </button>
 
-                        {/* Avatar */}
-                        <button className="app-avatar" title="Account" aria-label="Account">
-                            <div className="app-avatar-inner" />
-                        </button>
+                        {/* Avatar / Account */}
+                        <div style={{ position: "relative" }}>
+                            <button
+                                className="app-avatar"
+                                title="Account"
+                                aria-label="Account"
+                                onClick={() => setShowMenu(!showMenu)}
+                            >
+                                <div className="app-avatar-inner" />
+                                {user && (
+                                    <div style={{
+                                        position: "absolute",
+                                        bottom: -2,
+                                        right: -2,
+                                        width: 10,
+                                        height: 10,
+                                        borderRadius: "50%",
+                                        background: "var(--accent)",
+                                        border: "2px solid var(--bg)"
+                                    }} />
+                                )}
+                            </button>
+
+                            {showMenu && (
+                                <div className="glass" style={{
+                                    position: "absolute",
+                                    top: "100%",
+                                    right: 0,
+                                    marginTop: "0.5rem",
+                                    minWidth: "180px",
+                                    padding: "0.5rem",
+                                    borderRadius: "1rem",
+                                    zIndex: 100,
+                                    animation: "fadeIn 0.2s ease"
+                                }}>
+                                    <div style={{ padding: "0.75rem", borderBottom: "1px solid var(--line)", marginBottom: "0.35rem" }}>
+                                        <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Signed in as</div>
+                                        <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--ink)", wordBreak: "break-all" }}>{user?.full_name}</div>
+                                    </div>
+
+                                    <button
+                                        className="btn btn-ghost btn-sm"
+                                        style={{ width: "100%", justifyContent: "flex-start", color: "var(--error)" }}
+                                        onClick={async () => {
+                                            setShowMenu(false);
+                                            await signOut();
+                                            router.replace("/login");
+                                        }}
+                                    >
+                                        <LogOut size={16} />
+                                        <span>Sign Out</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </header>
             )}

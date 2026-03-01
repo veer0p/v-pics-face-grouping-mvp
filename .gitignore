@@ -19,3 +19,4 @@ tmp_obama.jpg
 web/package-lock.json
 /.next
 .vercel
+/node_modules

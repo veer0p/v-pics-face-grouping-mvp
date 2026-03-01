@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { getSupabaseBrowser } from "./supabase-browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { PhotoMetadataCache, type Photo } from "./photo-cache";
+import { useAuth } from "@/components/AuthContext";
 
 type UseRealtimePhotosOptions = {
     /** Current photos state */
@@ -21,6 +22,7 @@ type UseRealtimePhotosOptions = {
 export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseRealtimePhotosOptions) {
     const channelRef = useRef<RealtimeChannel | null>(null);
     const photosRef = useRef<Photo[]>(photos);
+    const { user, loading: authLoading } = useAuth();
 
     // Keep photosRef in sync with the latest prop
     useEffect(() => {
@@ -28,7 +30,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
     }, [photos]);
 
     useEffect(() => {
-        if (!enabled) return;
+        if (!enabled || authLoading || !user) return;
 
         const supabase = getSupabaseBrowser();
 
@@ -37,8 +39,8 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
             .on(
                 "postgres_changes",
                 { event: "INSERT", schema: "public", table: "photos" },
-                async (payload) => {
-                    const row = payload.new as any;
+                async (payload: { new: any }) => {
+                    const row = payload.new;
                     if (row.is_deleted) return;
 
                     try {
@@ -52,25 +54,25 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                             return [photo, ...prev];
                         });
 
-                        // Update cache using the latest ref content
-                        if (PhotoMetadataCache.get(0)) {
-                            PhotoMetadataCache.set(0, [photo, ...photosRef.current].slice(0, 40));
-                        }
+                        // Invalidate cache on new photo
+                        await PhotoMetadataCache.clear();
+                        await PhotoMetadataCache.setHash("");
                     } catch (err) {
                         console.error("[Realtime] Failed to fetch new photo:", err);
                     }
                 },
             )
-            // ... [rest of the component] ...
             .on(
                 "postgres_changes",
                 { event: "UPDATE", schema: "public", table: "photos" },
-                (payload) => {
-                    const row = payload.new as any;
+                async (payload: { new: any }) => {
+                    const row = payload.new;
 
                     // If soft-deleted, remove from the list
                     if (row.is_deleted) {
                         setPhotos((prev) => prev.filter((p) => p.id !== row.id));
+                        await PhotoMetadataCache.clear();
+                        await PhotoMetadataCache.setHash("");
                         return;
                     }
 
@@ -79,27 +81,26 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                         const next = prev.map((p) =>
                             p.id === row.id ? { ...p, isLiked: row.is_liked ?? p.isLiked } : p,
                         );
-                        // Update cache for any photo updated
-                        const updated = next.find(p => p.id === row.id);
-                        if (updated) PhotoMetadataCache.updatePhoto(updated);
                         return next;
                     });
+
+                    // Invalidate cache for any update
+                    await PhotoMetadataCache.clear();
+                    await PhotoMetadataCache.setHash("");
                 },
             )
             .on(
                 "postgres_changes",
                 { event: "DELETE", schema: "public", table: "photos" },
-                (payload) => {
-                    const row = payload.old as any;
-                    setPhotos((prev) => {
-                        const next = prev.filter((p) => p.id !== row.id);
-                        // Clear cache on delete to be safe, or we could update specifically
-                        PhotoMetadataCache.clear();
-                        return next;
-                    });
+                async (payload: { old: any }) => {
+                    const row = payload.old;
+                    setPhotos((prev) => prev.filter((p) => p.id !== row.id));
+                    // Invalidate cache
+                    await PhotoMetadataCache.clear();
+                    await PhotoMetadataCache.setHash("");
                 },
             )
-            .subscribe((status) => {
+            .subscribe((status: string) => {
                 console.log("[Realtime] Subscription status:", status);
             });
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { deleteObject } from "@/lib/b2";
 
 /**
@@ -12,6 +12,11 @@ export async function POST(req: NextRequest) {
     let thumb_key: string | undefined;
 
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+        const supabase = createServiceClient();
+
         const body = await req.json();
         original_key = body.original_key;
         thumb_key = body.thumb_key;
@@ -35,11 +40,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
         }
 
-        const supabase = createServiceClient();
-
         const { data, error } = await supabase
             .from("photos")
             .insert({
+                user_id: user.id,
                 id: id || undefined,
                 original_key,
                 original_name,

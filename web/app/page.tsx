@@ -44,54 +44,65 @@ export default function HomePage() {
         setError(null);
 
         try {
-            if (offset === 0 && !refreshing) {
-                const cached = PhotoMetadataCache.get(0);
-                const localHash = PhotoMetadataCache.getMetadataHash();
-                if (cached && localHash) {
-                    try {
-                        const checkRes = await fetch("/api/photos?check_latest=true");
-                        if (checkRes.ok) {
-                            const { hash: remoteHash } = await checkRes.json();
-                            if (remoteHash === localHash) {
-                                setPhotos(cached);
-                                setHasMore(cached.length === PAGE_SIZE);
-                                return;
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("[Cache] Check latest failed:", e);
+            // 1. Smart Cache Check (Async IndexedDB)
+            const localHash = await PhotoMetadataCache.getHash();
+            const cached = await PhotoMetadataCache.get(offset);
+
+            if (offset === 0 && localHash && !refreshing) {
+                // Check if collection has changed via server-side hash
+                const checkRes = await fetch(`/api/photos?hash=${localHash}&limit=${PAGE_SIZE}&offset=0`);
+                const data = await checkRes.json();
+
+                if (data.match) {
+                    console.log("✅ Cached (Hash matched, skipping DB query)");
+                    if (cached) {
+                        setPhotos(cached);
+                        setHasMore(cached.length === PAGE_SIZE);
+                        setLoading(false);
+                        return;
                     }
                 }
-            } else if (offset > 0) {
-                const cached = PhotoMetadataCache.get(offset);
-                if (cached) {
-                    setPhotos((prev) => [...prev, ...cached]);
-                    setHasMore(cached.length === PAGE_SIZE);
-                    return;
-                }
+            } else if (offset > 0 && cached && localHash) {
+                // For paged scrolls, if we have common hash, we can trust the cache
+                console.log(`✅ Cached (Offset ${offset})`);
+                setPhotos((prev) => [...prev, ...cached]);
+                setHasMore(cached.length === PAGE_SIZE);
+                setLoadingMore(false);
+                return;
             }
 
-            const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}`;
+            // 2. Network Fetch (Cache miss or Hash mismatch)
+            const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}&hash=${localHash || ""}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Failed to fetch photos");
             const data = await res.json();
-            const newPhotos: Photo[] = data.photos || [];
 
+            // If we get a new hash, we should ideally clear old cached pages 
+            // because the sequence might have changed (new uploads/deletes)
+            if (offset === 0 && data.hash && data.hash !== localHash) {
+                console.warn("🔄 Hash mismatch, refreshing collection...");
+                await PhotoMetadataCache.clear();
+                await PhotoMetadataCache.setHash(data.hash);
+            }
+
+            const newPhotos: Photo[] = data.photos || [];
             if (append) {
                 setPhotos((prev) => [...prev, ...newPhotos]);
             } else {
                 setPhotos(newPhotos);
             }
 
+            // 3. Update Cache
             await PhotoMetadataCache.set(offset, newPhotos);
             setHasMore(newPhotos.length === PAGE_SIZE);
         } catch (err) {
+            console.error("[Gallery] Fetch error:", err);
             setError(String(err));
         } finally {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [refreshing]);
+    }, [refreshing, photos.length, PAGE_SIZE]);
 
     useEffect(() => {
         fetchPhotos(0, false);
@@ -331,81 +342,91 @@ export default function HomePage() {
                                     onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
                                     onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
                                 >
-                                    <CachedImage src={photo.thumbUrl || photo.url} alt="" className="w-full h-full object-cover block transition-opacity duration-150"
+                                    <CachedImage
+                                        id={photo.id}
+                                        src={photo.thumbUrl || photo.url}
+                                        alt=""
+                                        className="w-full h-full object-cover block transition-opacity duration-150"
                                         style={{ width: "100%", height: "100%", objectFit: "cover", opacity: selectMode ? (isSelected ? 1 : 0.4) : 1 }}
+                                        category="thumb"
                                     />
                                     {photo.isLiked && !selectMode && <Heart size={16} fill="var(--accent)" color="var(--accent)" style={{ position: "absolute", bottom: 8, right: 8 }} />}
-                                    {selectMode && (
-                                        <div style={{
-                                            position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
-                                            background: isSelected ? "var(--accent)" : "var(--bg-elevated)",
-                                            border: `2px solid ${isSelected ? "var(--bg-elevated)" : "var(--accent)"}`,
-                                            display: "flex", alignItems: "center", justifyContent: "center",
-                                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)", transition: "all 150ms ease"
-                                        }}>
-                                            {isSelected && <Check size={16} color="var(--bg-elevated)" strokeWidth={4} />}
-                                        </div>
-                                    )}
-                                </div>
+                                    {
+                                        selectMode && (
+                                            <div style={{
+                                                position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
+                                                background: isSelected ? "var(--accent)" : "var(--bg-elevated)",
+                                                border: `2px solid ${isSelected ? "var(--bg-elevated)" : "var(--accent)"}`,
+                                                display: "flex", alignItems: "center", justifyContent: "center",
+                                                boxShadow: "0 2px 8px rgba(0,0,0,0.3)", transition: "all 150ms ease"
+                                            }}>
+                                                {isSelected && <Check size={16} color="var(--bg-elevated)" strokeWidth={4} />}
+                                            </div>
+                                        )
+                                    }
+                                </div >
                             );
                         })}
-                    </div>
-                </div>
+                    </div >
+                </div >
             ))}
 
             <div ref={observerRef} style={{ height: 100 }} />
             {loadingMore && <div style={{ textAlign: "center", padding: "1rem" }}><Loader size={20} className="spin" color="var(--accent)" /></div>}
 
-            {selectMode && (
-                <div style={{
-                    position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom))",
-                    left: 12, right: 12, zIndex: 60,
-                    display: "flex", alignItems: "center", justifyContent: "space-between",
-                    padding: "0.65rem 1rem", borderRadius: "var(--r-lg)",
-                    background: "var(--bg-elevated)", border: "1px solid var(--line)",
-                    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-                }}>
-                    <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</div>
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
-                        <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
-                            <FolderPlus size={14} /> Album
-                        </button>
-                        <button className="btn btn-sm" style={{ background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleDelete} disabled={deleting}>
-                            {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
-                            Delete
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {showAlbumPicker && (
-                <div style={{
-                    position: "fixed", inset: 0, zIndex: 100,
-                    background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
-                    display: "flex", alignItems: "flex-end",
-                }}>
-                    <div style={{ position: "absolute", inset: 0 }} onClick={() => setShowAlbumPicker(false)} />
+            {
+                selectMode && (
                     <div style={{
-                        position: "relative", width: "100%", background: "var(--bg-elevated)",
-                        borderRadius: "1.25rem 1.25rem 0 0", padding: "1.25rem",
-                        paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
-                        boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+                        position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom))",
+                        left: 12, right: 12, zIndex: 60,
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "0.65rem 1rem", borderRadius: "var(--r-lg)",
+                        background: "var(--bg-elevated)", border: "1px solid var(--line)",
+                        boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
                     }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
-                            <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Add to collection</h3>
-                            <button onClick={() => setShowAlbumPicker(false)} style={{ border: "none", background: "none", color: "var(--muted)" }}><X size={20} /></button>
-                        </div>
-                        <div style={{ maxHeight: "40vh", overflowY: "auto", display: "grid", gap: "0.5rem" }}>
-                            <button className="album-picker-item" onClick={handleCreateAndAdd} style={{ color: "var(--accent)" }}><Plus size={18} /> <span>New Album</span></button>
-                            {albums.map((a) => (
-                                <button key={a.id} className="album-picker-item" onClick={() => handleAddToAlbum(a.id)} disabled={!!addingToAlbum}>
-                                    {addingToAlbum === a.id ? <Loader size={18} className="spin" /> : <Image size={18} color="var(--muted)" />}
-                                    <span>{a.name}</span>
-                                </button>
-                            ))}
+                        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</div>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
+                                <FolderPlus size={14} /> Album
+                            </button>
+                            <button className="btn btn-sm" style={{ background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleDelete} disabled={deleting}>
+                                {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
+                                Delete
+                            </button>
                         </div>
                     </div>
-                    <style jsx>{`
+                )
+            }
+
+            {
+                showAlbumPicker && (
+                    <div style={{
+                        position: "fixed", inset: 0, zIndex: 100,
+                        background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+                        display: "flex", alignItems: "flex-end",
+                    }}>
+                        <div style={{ position: "absolute", inset: 0 }} onClick={() => setShowAlbumPicker(false)} />
+                        <div style={{
+                            position: "relative", width: "100%", background: "var(--bg-elevated)",
+                            borderRadius: "1.25rem 1.25rem 0 0", padding: "1.25rem",
+                            paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
+                            boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
+                        }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
+                                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Add to collection</h3>
+                                <button onClick={() => setShowAlbumPicker(false)} style={{ border: "none", background: "none", color: "var(--muted)" }}><X size={20} /></button>
+                            </div>
+                            <div style={{ maxHeight: "40vh", overflowY: "auto", display: "grid", gap: "0.5rem" }}>
+                                <button className="album-picker-item" onClick={handleCreateAndAdd} style={{ color: "var(--accent)" }}><Plus size={18} /> <span>New Album</span></button>
+                                {albums.map((a) => (
+                                    <button key={a.id} className="album-picker-item" onClick={() => handleAddToAlbum(a.id)} disabled={!!addingToAlbum}>
+                                        {addingToAlbum === a.id ? <Loader size={18} className="spin" /> : <Image size={18} color="var(--muted)" />}
+                                        <span>{a.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <style jsx>{`
                         .album-picker-item {
                             display: flex; align-items: center; gap: 0.75rem; width: 100%;
                             padding: 1rem; border: 1px solid var(--line);
@@ -413,8 +434,9 @@ export default function HomePage() {
                             font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: left;
                         }
                     `}</style>
-                </div>
-            )}
-        </div>
+                    </div>
+                )
+            }
+        </div >
     );
 }
