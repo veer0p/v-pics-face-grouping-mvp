@@ -9,5 +9,8 @@
         "web:dev": "npm run dev -w web",
         "web:build": "npm run build -w web",
         "web:start": "npm run start -w web"
+    },
+    "dependencies": {
+        "framer-motion": "^12.34.3"
     }
 }

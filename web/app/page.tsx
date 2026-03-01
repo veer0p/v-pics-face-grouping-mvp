@@ -339,8 +339,15 @@ export default function HomePage() {
                                     background: "var(--bg-subtle)", cursor: "pointer",
                                     borderRadius: "var(--r-sm)", overflow: "hidden"
                                 }}
-                                    onClick={() => selectMode ? toggleSelect(photo.id) : router.push(`/photo/${photo.id}`)}
-                                    onContextMenu={(e) => { e.preventDefault(); toggleSelect(photo.id); }}
+                                    onClick={() => {
+                                        if (selectMode) {
+                                            toggleSelect(photo.id);
+                                        } else {
+                                            // Save context for navigation
+                                            sessionStorage.setItem("current_gallery_context", JSON.stringify(sortedPhotos.map(p => p.id)));
+                                            router.push(`/photo/${photo.id}`);
+                                        }
+                                    }}
                                 >
                                     <CachedImage
                                         id={photo.id}

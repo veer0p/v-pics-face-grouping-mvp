@@ -5,9 +5,9 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import {
     ArrowLeft, Heart, Trash2, Download, Info, Loader, X,
-    Camera, Aperture, MapPin,
+    Camera, Aperture, MapPin, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { ImageBlobCache } from "@/lib/photo-cache";
+import { ImageBlobCache, PhotoDetailCache } from "@/lib/photo-cache";
 
 type PhotoDetail = {
     id: string;
@@ -54,19 +54,47 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     const [error, setError] = useState(false);
     const [liked, setLiked] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
+    const [idList, setIdList] = useState<string[]>([]);
+
+    useEffect(() => {
+        const stored = sessionStorage.getItem("current_gallery_context");
+        if (stored) {
+            try { setIdList(JSON.parse(stored)); } catch (e) { console.error(e); }
+        }
+    }, [id]);
+
+    const currentIndex = idList.indexOf(id);
+    const prevId = currentIndex > 0 ? idList[currentIndex - 1] : null;
+    const nextId = currentIndex < idList.length - 1 ? idList[currentIndex + 1] : null;
+
+    const navigate = (newId: string | null) => {
+        if (!newId) return;
+        setLoading(true);
+        router.replace(`/photo/${newId}`);
+    };
+
+    useEffect(() => {
+        const handleKeys = (e: KeyboardEvent) => {
+            if (e.key === "ArrowLeft" && prevId) navigate(prevId);
+            if (e.key === "ArrowRight" && nextId) navigate(nextId);
+            if (e.key === "Escape") router.back();
+        };
+        window.addEventListener("keydown", handleKeys);
+        return () => window.removeEventListener("keydown", handleKeys);
+    }, [prevId, nextId, router]);
 
     useEffect(() => {
         let active = true;
         (async () => {
             try {
-                const res = await fetch(`/api/photos/${id}`);
-                if (!res.ok) throw new Error("Not found");
-                const data = await res.json();
-                if (active) {
-                    setPhoto(data.photo);
-                    setLiked(data.photo.isLiked);
+                // 1. Fetch via Smart Cache (Handles hit, miss, and deduplication)
+                const data = await PhotoDetailCache.fetchAndCache(id);
+
+                if (active && data) {
+                    setPhoto(data);
+                    setLiked(data.isLiked);
                 }
-            } catch {
+            } catch (err) {
                 if (active) setError(true);
             } finally {
                 if (active) setLoading(false);
@@ -79,6 +107,12 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         if (!photo) return;
         const next = !liked;
         setLiked(next);
+        const updatedPhoto = { ...photo, isLiked: next };
+        setPhoto(updatedPhoto);
+
+        // Optimistic cache update
+        await PhotoDetailCache.set(photo.id, updatedPhoto);
+
         await fetch("/api/photos/favorite", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -160,182 +194,256 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     ].filter(Boolean).join("  ·  ");
 
     return (
-        <div style={{
-            position: "fixed", inset: 0, zIndex: 100,
-            background: "#000", display: "flex", flexDirection: "column",
-        }}>
-            <div className="photo-viewer-container">
-                {/* Main Content (Image) */}
-                <div className="photo-viewer-main">
-                    <div style={{
-                        display: "flex", alignItems: "center", justifyContent: "space-between",
-                        padding: "0.85rem 1rem",
-                        paddingTop: "calc(0.85rem + env(safe-area-inset-top))",
-                        background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)",
-                        position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
-                    }}>
-                        <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
-                            <ArrowLeft size={24} />
-                        </button>
-                        <div style={{ display: "flex", gap: "0.5rem" }}>
-                            <button onClick={toggleLike} style={btnStyle}>
-                                <Heart size={22} color={liked ? "#ff4d6a" : "#fff"}
-                                    fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
+        <>
+            <div style={{
+                position: "fixed", inset: 0, zIndex: 100,
+                background: "#000", display: "flex", flexDirection: "column",
+            }}>
+                <div className="photo-viewer-container">
+                    {/* Main Content (Image) */}
+                    <div className="photo-viewer-main">
+                        <div style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                            padding: "0.85rem 1rem",
+                            paddingTop: "calc(0.85rem + env(safe-area-inset-top))",
+                            background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)",
+                            position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+                        }}>
+                            <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
+                                <ArrowLeft size={24} />
                             </button>
-                            <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
-                                <Info size={22} />
-                            </button>
-                            <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
-                                <Download size={22} />
-                            </button>
-                            <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
-                                <Trash2 size={22} />
-                            </button>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                                <button onClick={toggleLike} style={btnStyle}>
+                                    <Heart size={22} color={liked ? "#ff4d6a" : "#fff"}
+                                        fill={liked ? "#ff4d6a" : "none"} strokeWidth={2} />
+                                </button>
+                                <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
+                                    <Info size={22} />
+                                </button>
+                                <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
+                                    <Download size={22} />
+                                </button>
+                                <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
+                                    <Trash2 size={22} />
+                                </button>
+                            </div>
+                        </div>
+
+                        <ZoomableImage
+                            id={photo.id}
+                            src={photo.url}
+                            alt={photo.filename}
+                            thumbUrl={photo.thumbUrl}
+                            onSwipeLeft={() => nextId && navigate(nextId)}
+                            onSwipeRight={() => prevId && navigate(prevId)}
+                        />
+
+                        {/* Side Arrows (Desktop) */}
+                        <div className="desktop-only">
+                            {prevId && (
+                                <button
+                                    onClick={() => navigate(prevId)}
+                                    className="nav-arrow-btn"
+                                    style={{ left: "1.5rem" }}
+                                >
+                                    <ChevronLeft size={36} />
+                                </button>
+                            )}
+                            {nextId && (
+                                <button
+                                    onClick={() => navigate(nextId)}
+                                    className="nav-arrow-btn"
+                                    style={{ right: "1.5rem" }}
+                                >
+                                    <ChevronRight size={36} />
+                                </button>
+                            )}
                         </div>
                     </div>
 
-                    <ZoomableImage
-                        id={photo.id}
-                        src={photo.url}
-                        alt={photo.filename}
-                        thumbUrl={photo.thumbUrl}
-                    />
-                </div>
-
-                {/* Desktop Aside (Details) */}
-                {showInfo && (
-                    <aside className="photo-viewer-aside desktop-only">
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-                            <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
-                        </div>
-
-                        {photo.takenAt && (
-                            <div style={{ marginBottom: "2rem" }}>
-                                <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
-                                <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
+                    {/* Desktop Aside (Details) */}
+                    {showInfo && (
+                        <aside className="photo-viewer-aside desktop-only">
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+                                <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
                             </div>
-                        )}
 
-                        {/* Camera section */}
-                        {(cameraInfo || shootingInfo) && (
-                            <div style={{
-                                background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                                padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                            }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                    <Camera size={20} color="var(--accent)" />
-                                    <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
+                            {photo.takenAt && (
+                                <div style={{ marginBottom: "2rem" }}>
+                                    <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
+                                    <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
                                 </div>
-                                {shootingInfo && (
+                            )}
+
+                            {/* Camera section */}
+                            {(cameraInfo || shootingInfo) && (
+                                <div style={{
+                                    background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                                    padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
+                                }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
+                                        <Camera size={20} color="var(--accent)" />
+                                        <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
+                                    </div>
+                                    {shootingInfo && (
+                                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                                            <Aperture size={18} color="var(--muted)" />
+                                            <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
+                                                {shootingInfo}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* GPS */}
+                            {photo.gpsLat && photo.gpsLng && (
+                                <div style={{
+                                    background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
+                                    padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
+                                }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <Aperture size={18} color="var(--muted)" />
-                                        <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
-                                            {shootingInfo}
+                                        <MapPin size={20} color="var(--success)" />
+                                        <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
+                                            {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
                                         </span>
                                     </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* GPS */}
-                        {photo.gpsLat && photo.gpsLng && (
-                            <div style={{
-                                background: "var(--bg-subtle)", borderRadius: "var(--r-md)",
-                                padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)"
-                            }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                    <MapPin size={20} color="var(--success)" />
-                                    <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>
-                                        {photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}
-                                    </span>
                                 </div>
-                            </div>
-                        )}
-
-                        {/* File info */}
-                        <div style={{
-                            display: "grid", gap: "0.75rem", fontSize: "0.9rem",
-                            color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
-                        }}>
-                            <Row label="Filename" value={photo.filename} />
-                            {photo.width && photo.height && (
-                                <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
                             )}
-                            <Row label="Size" value={formatBytes(photo.sizeBytes)} />
-                            <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
-                            <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+
+                            {/* File info */}
+                            <div style={{
+                                display: "grid", gap: "0.75rem", fontSize: "0.9rem",
+                                color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem"
+                            }}>
+                                <Row label="Filename" value={photo.filename} />
+                                {photo.width && photo.height && (
+                                    <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
+                                )}
+                                <Row label="Size" value={formatBytes(photo.sizeBytes)} />
+                                <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
+                                <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+                            </div>
+                        </aside>
+                    )}
+                </div>
+
+                {/* Mobile Info panel — slides up from bottom */}
+                {showInfo && (
+                    <div className="mobile-only" style={{
+                        position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
+                        overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
+                        padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
+                        borderRadius: "1.5rem 1.5rem 0 0", zIndex: 30,
+                        animation: "slide-up-sheet 300ms cubic-bezier(0.16,1,0.3,1)",
+                        color: "var(--ink)", borderTop: "1px solid var(--line)"
+                    }}>
+                        {/* Header */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+                            <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
+                            <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "var(--muted)" }}>
+                                <X size={20} />
+                            </button>
                         </div>
-                    </aside>
+
+                        {/* Info rows same as desktop but for mobile sheet */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                            {photo.takenAt && (
+                                <div>
+                                    <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>
+                                </div>
+                            )}
+
+                            {(cameraInfo || shootingInfo) && (
+                                <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                                        <Camera size={18} color="var(--accent)" />
+                                        <span style={{ fontSize: "1rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
+                                    </div>
+                                    {shootingInfo && (
+                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                            <Aperture size={16} color="var(--muted)" />
+                                            <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
+                                                {shootingInfo}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {photo.gpsLat && photo.gpsLng && (
+                                <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                        <MapPin size={18} color="var(--success)" />
+                                        <span style={{ fontSize: "0.9rem" }}>
+                                            {photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.5rem" }}>
+                                <Row label="Filename" value={photo.filename} />
+                                {photo.width && photo.height && (
+                                    <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
+                                )}
+                                <Row label="Size" value={formatBytes(photo.sizeBytes)} />
+                                <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
+                                <Row label="Uploaded" value={formatDate(photo.createdAt)} />
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
 
-            {/* Mobile Info panel — slides up from bottom */}
-            {showInfo && (
-                <div className="mobile-only" style={{
-                    position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
-                    overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
-                    padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
-                    borderRadius: "1.5rem 1.5rem 0 0", zIndex: 30,
-                    animation: "slide-up-sheet 300ms cubic-bezier(0.16,1,0.3,1)",
-                    color: "var(--ink)", borderTop: "1px solid var(--line)"
-                }}>
-                    {/* Header */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-                        <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
-                        <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "var(--muted)" }}>
-                            <X size={20} />
-                        </button>
-                    </div>
-
-                    {/* Info rows same as desktop but for mobile sheet */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                        {photo.takenAt && (
-                            <div>
-                                <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>
-                            </div>
-                        )}
-
-                        {(cameraInfo || shootingInfo) && (
-                            <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                                    <Camera size={18} color="var(--accent)" />
-                                    <span style={{ fontSize: "1rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
-                                </div>
-                                {shootingInfo && (
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                        <Aperture size={16} color="var(--muted)" />
-                                        <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>
-                                            {shootingInfo}
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {photo.gpsLat && photo.gpsLng && (
-                            <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                    <MapPin size={18} color="var(--success)" />
-                                    <span style={{ fontSize: "0.9rem" }}>
-                                        {photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
-
-                        <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.5rem" }}>
-                            <Row label="Filename" value={photo.filename} />
-                            {photo.width && photo.height && (
-                                <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />
-                            )}
-                            <Row label="Size" value={formatBytes(photo.sizeBytes)} />
-                            <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
-                            <Row label="Uploaded" value={formatDate(photo.createdAt)} />
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+            <style jsx global>{`
+            .nav-arrow-btn {
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+                background: rgba(255, 255, 255, 0.1);
+                backdrop-filter: blur(8px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: #fff;
+                width: 56px;
+                height: 56px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: all 200ms ease;
+                z-index: 30;
+                border: none;
+                padding: 0;
+            }
+            .nav-arrow-btn:hover {
+                background: rgba(255, 255, 255, 0.2);
+                transform: translateY(-50%) scale(1.1);
+            }
+            .nav-arrow-btn:active {
+                transform: translateY(-50%) scale(0.95);
+            }
+            .shimmer {
+                background: linear-gradient(
+                    90deg,
+                    rgba(255, 255, 255, 0) 0%,
+                    rgba(255, 255, 255, 0.2) 50%,
+                    rgba(255, 255, 255, 0) 100%
+                );
+                background-size: 200% 100%;
+                animation: shimmer 1.5s infinite;
+            }
+            @keyframes shimmer {
+                0% { background-position: -200% 0; }
+                100% { background-position: 200% 0; }
+            }
+            @keyframes slide-up-sheet {
+                from { transform: translateY(100%); }
+                to { transform: translateY(0); }
+            }
+            `}</style>
+        </>
     );
 }
 
@@ -348,11 +456,15 @@ function Row({ label, value }: { label: string; value: string }) {
     );
 }
 
-function ZoomableImage({ id, src, alt, thumbUrl }: { id: string; src: string; alt: string; thumbUrl: string }) {
+function ZoomableImage({ id, src, alt, thumbUrl, onSwipeLeft, onSwipeRight }: {
+    id: string; src: string; alt: string; thumbUrl: string;
+    onSwipeLeft?: () => void; onSwipeRight?: () => void;
+}) {
     const [scale, setScale] = useState(1);
     const [panning, setPanning] = useState(false);
     const [pos, setPos] = useState({ x: 0, y: 0 });
     const [start, setStart] = useState({ x: 0, y: 0 });
+    const [touchStartPos, setTouchStartPos] = useState({ x: 0, y: 0 });
     const [fullLoaded, setFullLoaded] = useState(false);
     const [pinchStartDist, setPinchStartDist] = useState<number | null>(null);
     const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -384,6 +496,7 @@ function ZoomableImage({ id, src, alt, thumbUrl }: { id: string; src: string; al
             setPanning(true);
             setStart({ x: clientX - pos.x, y: clientY - pos.y });
         }
+        setTouchStartPos({ x: clientX, y: clientY });
     };
 
     const handleMove = (clientX: number, clientY: number) => {
@@ -392,7 +505,18 @@ function ZoomableImage({ id, src, alt, thumbUrl }: { id: string; src: string; al
         }
     };
 
-    const handleEnd = () => setPanning(false);
+    const handleEnd = (clientX?: number, clientY?: number) => {
+        setPanning(false);
+        // Swipe Detection (only when not zoomed)
+        if (clientX !== undefined && clientY !== undefined && scale === 1) {
+            const deltaX = clientX - touchStartPos.x;
+            const deltaY = clientY - touchStartPos.y;
+            if (Math.abs(deltaX) > 60 && Math.abs(deltaY) < 40) {
+                if (deltaX > 0) onSwipeRight?.();
+                else onSwipeLeft?.();
+            }
+        }
+    };
 
     // Touch support for pinch-to-zoom
     const onTouchStart = (e: React.TouchEvent) => {
@@ -442,18 +566,24 @@ function ZoomableImage({ id, src, alt, thumbUrl }: { id: string; src: string; al
             onWheel={onWheel}
             onMouseDown={(e) => handleStart(e.clientX, e.clientY)}
             onMouseMove={(e) => handleMove(e.clientX, e.clientY)}
-            onMouseUp={handleEnd}
-            onMouseLeave={handleEnd}
+            onMouseUp={(e) => handleEnd(e.clientX, e.clientY)}
+            onMouseLeave={() => handleEnd()}
             onTouchStart={onTouchStart}
             onTouchMove={onTouchMove}
-            onTouchEnd={handleEnd}
+            onTouchEnd={(e) => {
+                const touch = e.changedTouches[0];
+                handleEnd(touch?.clientX, touch?.clientY);
+            }}
             onDoubleClick={toggleZoom}
         >
             {!fullLoaded && (
-                <img src={thumbUrl} alt="" style={{
-                    position: "absolute", width: "100%", height: "100%",
-                    objectFit: "contain", filter: "blur(20px)", transform: `scale(${scale * 1.1}) translate(${pos.x}px, ${pos.y}px)`,
-                }} />
+                <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+                    <img src={thumbUrl} alt="" style={{
+                        position: "absolute", width: "100%", height: "100%",
+                        objectFit: "contain", filter: "blur(20px)", transform: `scale(${scale * 1.1}) translate(${pos.x}px, ${pos.y}px)`,
+                    }} />
+                    <div className="shimmer" style={{ position: "absolute", inset: 0, zIndex: 1, opacity: 0.2 }} />
+                </div>
             )}
             <img
                 src={blobUrl || src}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Search, Settings, LogOut, Heart } from "lucide-react";
 import { useAuth } from "@/components/AuthContext";
@@ -141,7 +141,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
 
             <main className={`page-content${hideHeader ? " no-header" : ""}${showSidebar ? " with-sidebar" : ""}`}>
-                {children}
+                <Suspense fallback={null}>
+                    {children}
+                </Suspense>
             </main>
 
             {!hideHeader && <InstallPrompt />}

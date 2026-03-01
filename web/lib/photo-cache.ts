@@ -6,7 +6,7 @@
  */
 
 const DB_NAME = "v-pics-vault-db";
-const DB_VERSION = 2;
+const DB_VERSION = 5;
 
 export type Photo = {
     id: string;
@@ -26,15 +26,33 @@ const FULL_QUOTA = 1500 * 1024 * 1024; // 1.5 GB
 
 class IndexedDBStore {
     private db: IDBDatabase | null = null;
+    private dbPromise: Promise<IDBDatabase> | null = null;
 
     async getDB(): Promise<IDBDatabase> {
         if (this.db) return this.db;
-        return new Promise((resolve, reject) => {
+        if (this.dbPromise) return this.dbPromise;
+
+        this.dbPromise = new Promise((resolve, reject) => {
+            console.info(`🔑 Opening DB v${DB_VERSION}...`);
             const request = indexedDB.open(DB_NAME, DB_VERSION);
-            request.onerror = () => reject(request.error);
+            request.onerror = () => {
+                console.error("❌ [Cache] Open DB error:", request.error);
+                this.dbPromise = null;
+                reject(request.error);
+            };
+            request.onblocked = () => {
+                console.warn("⚠️ [Cache] DB open blocked. Please close other tabs.");
+            };
             request.onsuccess = () => {
                 this.db = request.result;
-                resolve(request.result);
+                this.dbPromise = null;
+                // Double check stores
+                if (!this.db.objectStoreNames.contains("details")) {
+                    console.warn("⚠️ [Cache] 'details' store missing, might need higher version.");
+                } else {
+                    console.info("✅ [Cache] IndexedDB Ready (v5)");
+                }
+                resolve(this.db);
             };
             request.onupgradeneeded = (e) => {
                 const db = (e.target as IDBOpenDBRequest).result;
@@ -58,8 +76,13 @@ class IndexedDBStore {
                 if (!db.objectStoreNames.contains("settings")) {
                     db.createObjectStore("settings");
                 }
+                // Photo Details (Single photo EXIF/Metadata)
+                if (!db.objectStoreNames.contains("details")) {
+                    db.createObjectStore("details", { keyPath: "id" });
+                }
             };
         });
+        return this.dbPromise;
     }
 
     async setSetting(key: string, value: any) {
@@ -228,6 +251,117 @@ export const PhotoMetadataCache = {
 };
 
 /**
+ * Individual Photo Detail Caching (EXIF, Camera, etc.)
+ * Uses In-Memory + IndexedDB hybrid.
+ */
+const inMemoryDetails = new Map<string, any>();
+const inFlightFetches = new Map<string, Promise<any>>();
+
+export const PhotoDetailCache = {
+    async get(id: string): Promise<any | null> {
+        if (typeof window === "undefined") return null;
+
+        // 1. Memory Check
+        if (inMemoryDetails.has(id)) {
+            console.info(`⚡ [Memory] Hit (details:${id.slice(0, 8)})`);
+            return inMemoryDetails.get(id);
+        }
+
+        // 2. In-flight Check (Deduplication)
+        if (inFlightFetches.has(id)) {
+            return inFlightFetches.get(id);
+        }
+
+        try {
+            const db = await Store.getDB();
+            const tx = db.transaction("details", "readonly");
+            const store = tx.objectStore("details");
+            return new Promise((res) => {
+                const req = store.get(id);
+                req.onsuccess = () => {
+                    const data = req.result?.data || null;
+                    if (data) {
+                        console.info(`✅ [Cache] Hit (details:${id.slice(0, 8)})`);
+                        inMemoryDetails.set(id, data);
+                    } else {
+                        console.warn(`⏳ [Cache] Miss (details:${id.slice(0, 8)})`);
+                    }
+                    res(data);
+                };
+                req.onerror = () => res(null);
+            });
+        } catch (err) {
+            return null;
+        }
+    },
+
+    async set(id: string, data: any) {
+        if (typeof window === "undefined") return;
+        inMemoryDetails.set(id, data);
+        try {
+            const db = await Store.getDB();
+            const tx = db.transaction("details", "readwrite");
+            tx.objectStore("details").put({ id, data, timestamp: Date.now() });
+            tx.oncomplete = () => console.info(`💾 [Cache] Saved (details:${id.slice(0, 8)})`);
+        } catch (err) { }
+    },
+
+    async fetchAndCache(id: string): Promise<any> {
+        if (typeof window === "undefined") return null;
+
+        // 1. Try Cache
+        const cached = await this.get(id);
+        if (cached) return cached;
+
+        // 2. Try In-flight
+        if (inFlightFetches.has(id)) {
+            console.info(`🔗 [Cache] Joining in-flight fetch (id:${id.slice(0, 8)})`);
+            return inFlightFetches.get(id);
+        }
+
+        // 3. Network Fetch
+        console.warn(`📡 [Network] Fetching details... (id:${id.slice(0, 8)})`);
+        const fetchPromise = (async () => {
+            try {
+                const res = await fetch(`/api/photos/${id}`);
+                if (!res.ok) throw new Error("Not found");
+                const data = await res.json();
+                await this.set(id, data.photo);
+                return data.photo;
+            } catch (err) {
+                console.error(`❌ [Network] Failed to fetch:`, err);
+                throw err;
+            } finally {
+                inFlightFetches.delete(id);
+            }
+        })();
+
+        inFlightFetches.set(id, fetchPromise);
+        return fetchPromise;
+    },
+
+    async delete(id: string) {
+        if (typeof window === "undefined") return;
+        inMemoryDetails.delete(id);
+        try {
+            const db = await Store.getDB();
+            const tx = db.transaction("details", "readwrite");
+            tx.objectStore("details").delete(id);
+        } catch (err) { }
+    },
+
+    async clear() {
+        if (typeof window === "undefined") return;
+        inMemoryDetails.clear();
+        try {
+            const db = await Store.getDB();
+            const tx = db.transaction("details", "readwrite");
+            tx.objectStore("details").clear();
+        } catch (err) { }
+    }
+};
+
+/**
  * Image Blob Caching
  */
 export const ImageBlobCache = {
@@ -244,18 +378,19 @@ export const ImageBlobCache = {
         // 1. Try DB first
         const cachedUrl = await this.get(id, category);
         if (cachedUrl) {
-            console.log(`✅ Cached (${category}:${id.slice(0, 8)}...)`);
+            console.info(`✅ [Cache] Hit (${category}:${id.slice(0, 8)})`);
             return cachedUrl;
         }
 
         // 2. Fetch from network
-        console.warn(`❌ B2 Fetch (${category}:${id.slice(0, 8)}...)`);
+        console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
         const blob = await res.blob();
 
         // 3. Store in DB
         await Store.saveImage(id, blob, category);
+        console.info(`💾 [Cache] Saved (${category}:${id.slice(0, 8)})`);
 
         // 4. Return Object URL
         return URL.createObjectURL(blob);

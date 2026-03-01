@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { getSupabaseBrowser } from "./supabase-browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-import { PhotoMetadataCache, type Photo } from "./photo-cache";
+import { PhotoMetadataCache, PhotoDetailCache, type Photo } from "./photo-cache";
 import { useAuth } from "@/components/AuthContext";
 
 type UseRealtimePhotosOptions = {
@@ -73,6 +73,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                         setPhotos((prev) => prev.filter((p) => p.id !== row.id));
                         await PhotoMetadataCache.clear();
                         await PhotoMetadataCache.setHash("");
+                        await PhotoDetailCache.delete(row.id);
                         return;
                     }
 
@@ -87,6 +88,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                     // Invalidate cache for any update
                     await PhotoMetadataCache.clear();
                     await PhotoMetadataCache.setHash("");
+                    await PhotoDetailCache.delete(row.id);
                 },
             )
             .on(
@@ -98,6 +100,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                     // Invalidate cache
                     await PhotoMetadataCache.clear();
                     await PhotoMetadataCache.setHash("");
+                    await PhotoDetailCache.delete(row.id);
                 },
             )
             .subscribe((status: string) => {
