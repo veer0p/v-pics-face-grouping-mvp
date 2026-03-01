@@ -45,7 +45,7 @@ export const PookieBackground: React.FC<{ accentIndex?: number }> = ({ accentInd
             return {
                 x: Math.random() * width,
                 y: randomY ? Math.random() * height : -50,
-                size: 16 + Math.random() * 24,
+                size: 12 + Math.random() * 12,
                 speed: 0.4 + Math.random() * 0.8,
                 opacity: 0.2 + Math.random() * 0.4,
                 emoji: emojis[Math.floor(Math.random() * emojis.length)],

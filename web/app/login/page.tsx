@@ -1,17 +1,33 @@
 "use client";
-// Forced rebuild for PIN-auth transition
-
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthContext";
+import { useTheme } from "@/components/ThemeProvider";
 import { Loader, Lock, Camera, Fingerprint, Delete } from "lucide-react";
 
 export default function LoginPage() {
+    const { resolved } = useTheme();
     const [pin, setPin] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(false);
     const { user, loading: authLoading, signInWithPin } = useAuth();
     const router = useRouter();
+
+    // Keyboard support
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (authLoading || loading) return;
+
+            if (e.key >= "0" && e.key <= "9") {
+                handlePinPress(e.key);
+            } else if (e.key === "Backspace") {
+                handleDelete();
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [authLoading, loading, pin]); // Dependency on pin ensures it stays fresh if used internally
 
     // Redirect if already logged in
     useEffect(() => {
@@ -49,8 +65,8 @@ export default function LoginPage() {
 
     if (authLoading || (user && !authLoading)) {
         return (
-            <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#000" }}>
-                <Loader className="spin" color="#00FF41" />
+            <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+                <Loader className="spin" color="var(--accent)" />
             </div>
         );
     }
@@ -62,7 +78,10 @@ export default function LoginPage() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: "radial-gradient(circle at center, #0a0a0a 0%, #000 100%)",
+            background: "var(--bg)",
+            backgroundImage: resolved === "dark"
+                ? "radial-gradient(circle at center, var(--bg-subtle) 0%, var(--bg) 100%)"
+                : "none",
             color: "var(--ink)",
             padding: "2rem",
             userSelect: "none"
@@ -73,14 +92,15 @@ export default function LoginPage() {
                     width: "64px",
                     height: "64px",
                     borderRadius: "50%",
-                    background: "conic-gradient(from 0deg, #00FF41, #003B00, #00FF41)",
+                    background: `linear-gradient(135deg, var(--accent), var(--accent-2))`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
                     margin: "0 auto 1.5rem",
-                    boxShadow: "0 0 30px rgba(0, 255, 65, 0.3)",
+                    boxShadow: resolved === "dark" ? "0 0 30px var(--accent-soft)" : "none",
+                    border: resolved === "light" ? "1px solid var(--line)" : "none",
                 }}>
-                    <Camera size={32} color="#000" />
+                    <Camera size={28} color={resolved === "dark" ? "#000" : "#fff"} />
                 </div>
                 <h1 style={{ fontSize: "1.25rem", letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 700 }}>Vault Access</h1>
                 <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: "0.5rem" }}>Enter PIN for Veer</p>
@@ -125,7 +145,7 @@ export default function LoginPage() {
                             borderRadius: "50%",
                             border: "1px solid var(--line)",
                             background: "var(--bg-subtle)",
-                            color: "#fff",
+                            color: "var(--ink)",
                             fontSize: "1.5rem",
                             fontWeight: 500,
                             display: "flex",
@@ -160,7 +180,7 @@ export default function LoginPage() {
                         borderRadius: "50%",
                         border: "1px solid var(--line)",
                         background: "var(--bg-subtle)",
-                        color: "#fff",
+                        color: "var(--ink)",
                         fontSize: "1.5rem",
                         fontWeight: 500,
                         display: "flex",
