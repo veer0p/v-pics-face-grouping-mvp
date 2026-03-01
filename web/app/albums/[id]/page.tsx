@@ -198,26 +198,6 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                 />
             </BottomSheet>
 
-            <style jsx>{`
-                .menu-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.65rem;
-                    width: 100%;
-                    padding: 0.65rem 0.75rem;
-                    border: none;
-                    background: none;
-                    color: var(--ink-1);
-                    font-size: 0.82rem;
-                    font-weight: 500;
-                    border-radius: var(--r-sm);
-                    cursor: pointer;
-                    text-align: left;
-                }
-                .menu-item:hover {
-                    background: var(--bg-subtle);
-                }
-            `}</style>
         </div>
     );
 }

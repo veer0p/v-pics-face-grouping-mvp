@@ -396,53 +396,6 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                 )}
             </div>
 
-            <style jsx global>{`
-            .nav-arrow-btn {
-                position: absolute;
-                top: 50%;
-                transform: translateY(-50%);
-                background: rgba(255, 255, 255, 0.1);
-                backdrop-filter: blur(8px);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                color: #fff;
-                width: 56px;
-                height: 56px;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                transition: all 200ms ease;
-                z-index: 30;
-                border: none;
-                padding: 0;
-            }
-            .nav-arrow-btn:hover {
-                background: rgba(255, 255, 255, 0.2);
-                transform: translateY(-50%) scale(1.1);
-            }
-            .nav-arrow-btn:active {
-                transform: translateY(-50%) scale(0.95);
-            }
-            .shimmer {
-                background: linear-gradient(
-                    90deg,
-                    rgba(255, 255, 255, 0) 0%,
-                    rgba(255, 255, 255, 0.2) 50%,
-                    rgba(255, 255, 255, 0) 100%
-                );
-                background-size: 200% 100%;
-                animation: shimmer 1.5s infinite;
-            }
-            @keyframes shimmer {
-                0% { background-position: -200% 0; }
-                100% { background-position: 200% 0; }
-            }
-            @keyframes slide-up-sheet {
-                from { transform: translateY(100%); }
-                to { transform: translateY(0); }
-            }
-            `}</style>
         </>
     );
 }

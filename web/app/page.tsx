@@ -433,14 +433,6 @@ export default function HomePage() {
                                 ))}
                             </div>
                         </div>
-                        <style jsx>{`
-                        .album-picker-item {
-                            display: flex; align-items: center; gap: 0.75rem; width: 100%;
-                            padding: 1rem; border: 1px solid var(--line);
-                            background: var(--bg-card); border-radius: var(--r-md);
-                            font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: left;
-                        }
-                    `}</style>
                     </div>
                 )
             }
