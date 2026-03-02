@@ -5,12 +5,7 @@ import { cookies } from "next/headers";
 function mustEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    // If we're during build/prerender, don't throw, just provide a dummy value.
-    // This allows the build to complete as long as these variables are not used
-    // for actual static data fetching.
-    console.warn(`[Supabase-Server] Missing environment variable: ${name}. Using dummy for build.`);
-    if (name.includes("URL")) return "https://dummy.supabase.co";
-    return "dummy-key";
+    throw new Error(`Missing environment variable: ${name}`);
   }
   return value;
 }
