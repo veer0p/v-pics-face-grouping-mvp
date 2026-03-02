@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthContext";
+import { useNetwork } from "@/components/NetworkContext";
 import { UploadQueueStore, type UploadQueueItem } from "@/lib/upload-queue";
 import { calculateHash, extractBrowserExif, generateThumbnail, uploadToB2 } from "@/lib/upload-utils";
 import { PhotoMetadataCache } from "@/lib/photo-cache";
@@ -10,7 +11,8 @@ const MAX_HASHES_PER_REQUEST = 500;
 const QUEUE_MAX_ITEMS = 3000;
 const META_CONCURRENCY = 3;
 const UPLOAD_BASE_CONCURRENCY = 4;
-const RETRY_BACKOFF_MS = [5000, 15000, 30000, 60000, 120000] as const;
+const RETRY_BACKOFF_MS = [5000, 15000] as const;
+const MAX_RETRIES = 2;
 const SCHEDULER_INTERVAL_MS = 1500;
 
 type ServerPhotoMarker = {
@@ -40,6 +42,7 @@ type UploadQueueContextType = {
     pendingItems: PendingUploadItem[];
     enqueueFiles: (files: File[]) => Promise<{ queued: number; duplicates: number }>;
     retry: (localId: string) => Promise<void>;
+    retryAll: () => Promise<void>;
     remove: (localId: string) => Promise<void>;
     reconcileWithServerPhotos: (photos: ServerPhotoMarker[]) => Promise<void>;
 };
@@ -50,6 +53,7 @@ const UploadQueueContext = createContext<UploadQueueContextType>({
     pendingItems: [],
     enqueueFiles: async () => ({ queued: 0, duplicates: 0 }),
     retry: async () => { },
+    retryAll: async () => { },
     remove: async () => { },
     reconcileWithServerPhotos: async () => { },
 });
@@ -172,6 +176,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     }, [revokePreview]);
 
     const uploadOne = useCallback(async (item: UploadQueueItem) => {
+        if (!navigator.onLine) {
+            // Silently skip — scheduler will retry when online
+            await patchQueueItem(item.local_id, { status: "queued_upload", progress: 0 });
+            return;
+        }
         const startAttemptAt = new Date().toISOString();
         await patchQueueItem(item.local_id, {
             status: "uploading",
@@ -302,6 +311,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
     const launchWorkers = useCallback(async () => {
         if (authLoading || !user || !queueLoaded) return;
+        if (!navigator.onLine) return; // Don't attempt uploads when offline
 
         const concurrency = getUploadConcurrency();
         if (inFlightRef.current.size >= concurrency) return;
@@ -314,7 +324,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 if (inFlightRef.current.has(item.local_id)) return false;
                 if (item.status === "queued_upload") return true;
                 if (item.status !== "failed") return false;
-                if (item.attempts >= 5) return false;
+                if (item.attempts >= MAX_RETRIES) return false;
                 if (!item.last_attempt_at) return true;
                 const delay = getRetryDelay(item.attempts);
                 return now - new Date(item.last_attempt_at).getTime() >= delay;
@@ -487,6 +497,21 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         await removeQueueItem(localId);
     }, [removeQueueItem]);
 
+    const retryAll = useCallback(async () => {
+        const failedItems = queueRef.current.filter((item) => item.status === "failed");
+        if (failedItems.length === 0) return;
+        for (const item of failedItems) {
+            await patchQueueItem(item.local_id, {
+                status: "queued_upload",
+                error: null,
+                attempts: 0,
+                last_attempt_at: null,
+                progress: 0,
+            });
+        }
+        void launchWorkers();
+    }, [launchWorkers, patchQueueItem]);
+
     const reconcileWithServerPhotos = useCallback(async (photos: ServerPhotoMarker[]) => {
         if (photos.length === 0) return;
 
@@ -635,9 +660,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         pendingItems,
         enqueueFiles,
         retry,
+        retryAll,
         remove,
         reconcileWithServerPhotos,
-    }), [authLoading, enqueueFiles, isEnabled, pendingItems, queueLoaded, reconcileWithServerPhotos, remove, retry]);
+    }), [authLoading, enqueueFiles, isEnabled, pendingItems, queueLoaded, reconcileWithServerPhotos, remove, retry, retryAll]);
 
     return (
         <UploadQueueContext.Provider value={value}>

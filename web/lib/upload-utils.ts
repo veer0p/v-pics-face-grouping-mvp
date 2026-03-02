@@ -193,6 +193,9 @@ export async function uploadToB2(
     uploadUrl: string,
     onProgress: (percent: number) => void
 ): Promise<void> {
+    if (!navigator.onLine) {
+        return Promise.reject(new Error("Offline — upload deferred"));
+    }
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", uploadUrl);

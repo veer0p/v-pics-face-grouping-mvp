@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Loader } from "lucide-react";
+import { Upload, Loader, RefreshCw, CheckCircle, AlertCircle, Clock } from "lucide-react";
 import * as fflate from "fflate";
 import { useUploadQueue } from "@/components/UploadQueueProvider";
 
@@ -23,10 +23,19 @@ const getMimeFromExt = (name: string) => {
 export default function UploadPage() {
     const router = useRouter();
     const inputRef = useRef<HTMLInputElement>(null);
-    const { enqueueFiles } = useUploadQueue();
+    const { enqueueFiles, pendingItems, retryAll } = useUploadQueue();
     const [dragOver, setDragOver] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [retrying, setRetrying] = useState(false);
+
+    // Queue stats
+    const uploading = pendingItems.filter(i => i.status === "uploading").length;
+    const queued = pendingItems.filter(i => i.status === "queued_upload" || i.status === "pending_hash").length;
+    const uploaded = pendingItems.filter(i => i.status === "uploaded").length;
+    const failed = pendingItems.filter(i => i.status === "failed").length;
+    const total = pendingItems.length;
+    const hasQueue = total > 0;
 
     const processZip = useCallback(async (zipFile: File): Promise<File[]> => {
         if (zipFile.size > 2 * 1024 * 1024 * 1024) {
@@ -130,6 +139,12 @@ export default function UploadPage() {
             setProcessing(false);
         }
     }, [enqueueFiles, normalizeFiles, processing, router]);
+
+    const handleRetryAll = async () => {
+        setRetrying(true);
+        await retryAll();
+        setRetrying(false);
+    };
 
     return (
         <div className="page-shell">
@@ -239,6 +254,91 @@ export default function UploadPage() {
                     }}
                 />
             </div>
+
+            {/* Queue Status Summary */}
+            {hasQueue && (
+                <div style={{
+                    marginTop: "1.5rem",
+                    padding: "1rem 1.25rem",
+                    background: "var(--glass-bg-card)",
+                    backdropFilter: "blur(var(--glass-blur))",
+                    border: "1px solid var(--glass-border)",
+                    borderRadius: "var(--r-md)",
+                    boxShadow: "var(--glow-shadow)",
+                }}>
+                    <div style={{
+                        display: "flex", justifyContent: "space-between",
+                        alignItems: "center", marginBottom: "0.75rem",
+                    }}>
+                        <h3 style={{ fontSize: "0.95rem", fontWeight: 700 }}>Upload Queue</h3>
+                        <span style={{ fontSize: "0.8rem", color: "var(--muted)", fontWeight: 600 }}>{total} items</span>
+                    </div>
+
+                    <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, 1fr)",
+                        gap: "0.5rem",
+                    }}>
+                        {(uploading + queued) > 0 && (
+                            <div style={{
+                                display: "flex", alignItems: "center", gap: "0.5rem",
+                                padding: "0.6rem 0.75rem",
+                                background: "var(--bg-subtle)", borderRadius: "var(--r-sm)",
+                            }}>
+                                <Loader size={16} className="spin" color="var(--accent)" />
+                                <div>
+                                    <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1 }}>{uploading + queued}</p>
+                                    <p style={{ fontSize: "0.7rem", color: "var(--muted)" }}>In Progress</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {uploaded > 0 && (
+                            <div style={{
+                                display: "flex", alignItems: "center", gap: "0.5rem",
+                                padding: "0.6rem 0.75rem",
+                                background: "var(--bg-subtle)", borderRadius: "var(--r-sm)",
+                            }}>
+                                <CheckCircle size={16} color="#4ade80" />
+                                <div>
+                                    <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1 }}>{uploaded}</p>
+                                    <p style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Backed Up</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {failed > 0 && (
+                            <div style={{
+                                display: "flex", alignItems: "center", gap: "0.5rem",
+                                padding: "0.6rem 0.75rem",
+                                background: "rgba(248,113,113,0.08)", borderRadius: "var(--r-sm)",
+                            }}>
+                                <AlertCircle size={16} color="#f87171" />
+                                <div>
+                                    <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1, color: "#f87171" }}>{failed}</p>
+                                    <p style={{ fontSize: "0.7rem", color: "var(--muted)" }}>Failed</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {failed > 0 && (
+                        <button
+                            className="btn btn-secondary"
+                            style={{
+                                width: "100%", marginTop: "0.75rem",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                gap: "0.4rem",
+                            }}
+                            onClick={handleRetryAll}
+                            disabled={retrying}
+                        >
+                            {retrying ? <Loader size={16} className="spin" /> : <RefreshCw size={16} />}
+                            Retry All Failed ({failed})
+                        </button>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

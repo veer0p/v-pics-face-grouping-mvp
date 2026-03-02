@@ -3,6 +3,7 @@ import { getSupabaseBrowser } from "./supabase-browser";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { PhotoMetadataCache, PhotoDetailCache, type Photo } from "./photo-cache";
 import { useAuth } from "@/components/AuthContext";
+import { useNetwork } from "@/components/NetworkContext";
 
 type UseRealtimePhotosOptions = {
     /** Setter to update the photos list */
@@ -20,9 +21,10 @@ type UseRealtimePhotosOptions = {
 export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhotosOptions) {
     const channelRef = useRef<RealtimeChannel | null>(null);
     const { user, loading: authLoading } = useAuth();
+    const { isOnline } = useNetwork();
 
     useEffect(() => {
-        if (!enabled || authLoading || !user) return;
+        if (!enabled || authLoading || !user || !isOnline) return;
 
         const supabase = getSupabaseBrowser();
 
@@ -108,5 +110,5 @@ export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhot
             supabase.removeChannel(channel);
             channelRef.current = null;
         };
-    }, [enabled, setPhotos, authLoading, user?.id]);
+    }, [enabled, setPhotos, authLoading, user?.id, isOnline]);
 }

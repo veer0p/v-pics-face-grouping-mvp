@@ -42,6 +42,8 @@ export const viewport: Viewport = {
     viewportFit: "cover",
 };
 
+import { NetworkProvider } from "@/components/NetworkContext";
+
 export default function RootLayout({
     children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -49,13 +51,15 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
             <body className={`${dmSans.variable} ${fraunces.variable}`}
                 style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}>
-                <AuthProvider>
-                    <ThemeProvider>
-                        <UploadQueueProvider>
-                            <AppShell>{children}</AppShell>
-                        </UploadQueueProvider>
-                    </ThemeProvider>
-                </AuthProvider>
+                <NetworkProvider>
+                    <AuthProvider>
+                        <ThemeProvider>
+                            <UploadQueueProvider>
+                                <AppShell>{children}</AppShell>
+                            </UploadQueueProvider>
+                        </ThemeProvider>
+                    </AuthProvider>
+                </NetworkProvider>
             </body>
         </html>
     );

@@ -4,12 +4,13 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, AlertTriangle,
+    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, CloudCheck,
 } from "lucide-react";
 import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
 import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
 import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
+import { useNetwork } from "@/components/NetworkContext";
 
 const PAGE_SIZE = 40;
 
@@ -39,6 +40,7 @@ export default function HomePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { pendingItems, retry, remove, reconcileWithServerPhotos } = useUploadQueue();
+    const { isOnline } = useNetwork();
     const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
     const forceFreshLoad = searchParams.get("fresh") === "1";
 
@@ -97,6 +99,12 @@ export default function HomePage() {
         options?: { forceNetwork?: boolean }
     ) => {
         const forceNetwork = !!options?.forceNetwork;
+        if (!navigator.onLine) {
+            // Offline — skip API calls, just show cached/local photos
+            setLoading(false);
+            setLoadingMore(false);
+            return;
+        }
         if (offset === 0) setLoading(true);
         else setLoadingMore(true);
         setError(null);
@@ -173,13 +181,14 @@ export default function HomePage() {
     }, [fetchPhotos, filter, forceFreshLoad]);
 
     useEffect(() => {
+        if (!isOnline) return;
         void reconcileWithServerPhotos(
             photos.map((photo) => ({
                 id: photo.id,
                 contentHash: photo.contentHash || null,
             })),
         );
-    }, [photos, reconcileWithServerPhotos]);
+    }, [photos, reconcileWithServerPhotos, isOnline]);
 
     const uploadedPendingCount = useMemo(
         () => pendingItems.filter((item) => item.status === "uploaded").length,
@@ -187,7 +196,7 @@ export default function HomePage() {
     );
 
     useEffect(() => {
-        if (uploadedPendingCount === 0) return;
+        if (uploadedPendingCount === 0 || !isOnline) return;
         const timer = window.setInterval(() => {
             void fetchPhotos(0, false, { forceNetwork: true });
         }, 3000);
@@ -409,13 +418,8 @@ export default function HomePage() {
         return date.toLocaleDateString(undefined, options);
     }
 
-    function getLocalStatusLabel(photo: LocalGalleryPhoto) {
-        if (photo.status === "pending_hash") return "Preparing";
-        if (photo.status === "queued_upload") return "Queued";
-        if (photo.status === "uploading") return `Uploading ${photo.progress}%`;
-        if (photo.status === "uploaded") return "Syncing...";
-        if (photo.status === "failed") return "Failed • Tap to retry";
-        return "Pending";
+    function getLocalStatusLabel(_photo: LocalGalleryPhoto) {
+        return "";
     }
 
     return (
@@ -492,7 +496,7 @@ export default function HomePage() {
                                             position: "relative",
                                             aspectRatio: "1",
                                             background: "var(--bg-subtle)",
-                                            cursor: isLocal ? (photo.status === "failed" ? "pointer" : "default") : "pointer",
+                                            cursor: "pointer",
                                             borderRadius: "var(--r-sm)",
                                             overflow: "hidden",
                                             opacity: selectMode && !isLocal ? (isSelected ? 1 : 0.4) : 1,
@@ -521,9 +525,17 @@ export default function HomePage() {
                                             }
 
                                             if (isLocal) {
-                                                if (photo.status === "failed") {
-                                                    void retry(photo.localId);
-                                                }
+                                                // Open local photo in viewer using preview URL
+                                                sessionStorage.setItem("local_photo_preview", JSON.stringify({
+                                                    id: photo.id,
+                                                    url: photo.url,
+                                                    filename: photo.filename,
+                                                    mimeType: photo.mimeType,
+                                                    sizeBytes: photo.sizeBytes,
+                                                    createdAt: photo.createdAt,
+                                                }));
+                                                sessionStorage.setItem("current_gallery_context", JSON.stringify([photo.id]));
+                                                router.push(`/photo/${encodeURIComponent(photo.id)}`);
                                                 return;
                                             }
 
@@ -562,67 +574,15 @@ export default function HomePage() {
                                             />
                                         )}
 
-                                        {isLocal && (
-                                            <>
-                                                <div style={{
-                                                    position: "absolute",
-                                                    inset: 0,
-                                                    background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0.08) 55%)",
-                                                }} />
-                                                <div style={{
-                                                    position: "absolute",
-                                                    left: 8,
-                                                    right: 8,
-                                                    bottom: 8,
-                                                    display: "flex",
-                                                    flexDirection: "column",
-                                                    gap: "0.28rem",
-                                                }}>
-                                                    <span style={{
-                                                        fontSize: "0.68rem",
-                                                        fontWeight: 700,
-                                                        color: "#fff",
-                                                        textShadow: "0 1px 2px rgba(0,0,0,0.55)",
-                                                    }}>
-                                                        {getLocalStatusLabel(photo)}
-                                                    </span>
-                                                    {(photo.status === "uploading" || photo.status === "queued_upload" || photo.status === "pending_hash") && (
-                                                        <div style={{ width: "100%", height: 4, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.24)" }}>
-                                                            <div style={{
-                                                                width: `${Math.max(5, photo.progress)}%`,
-                                                                height: "100%",
-                                                                background: "#fff",
-                                                                transition: "width 150ms ease",
-                                                            }} />
-                                                        </div>
-                                                    )}
-                                                    {photo.status === "failed" && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                void remove(photo.localId);
-                                                            }}
-                                                            style={{
-                                                                marginTop: "0.1rem",
-                                                                border: "none",
-                                                                background: "rgba(0,0,0,0.42)",
-                                                                color: "#fff",
-                                                                fontSize: "0.65rem",
-                                                                borderRadius: 999,
-                                                                padding: "0.2rem 0.45rem",
-                                                                alignSelf: "flex-start",
-                                                                display: "inline-flex",
-                                                                alignItems: "center",
-                                                                gap: "0.2rem",
-                                                            }}
-                                                        >
-                                                            <AlertTriangle size={10} />
-                                                            Remove
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </>
+                                        {isLocal && photo.status === "uploaded" && (
+                                            <div style={{
+                                                position: "absolute", bottom: 6, right: 6,
+                                                width: 20, height: 20, borderRadius: "50%",
+                                                background: "rgba(0,0,0,0.5)",
+                                                display: "flex", alignItems: "center", justifyContent: "center",
+                                            }}>
+                                                <CloudCheck size={13} color="#4ade80" strokeWidth={2.5} />
+                                            </div>
                                         )}
 
                                         {selectMode && !isLocal && (

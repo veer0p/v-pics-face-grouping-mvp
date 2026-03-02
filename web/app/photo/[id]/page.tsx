@@ -55,6 +55,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [photos, setPhotos] = useState<Record<string, PhotoDetail>>({});
     const [idAtCenter, setIdAtCenter] = useState(initialId); // For URL sync
+    const isLocalPhoto = initialId.startsWith("local:");
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
@@ -62,6 +63,45 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 
     // Initialize ID List from context
     useEffect(() => {
+        // Handle local photo previews
+        if (isLocalPhoto) {
+            const stored = sessionStorage.getItem("local_photo_preview");
+            if (stored) {
+                try {
+                    const localData = JSON.parse(stored);
+                    setPhotos({
+                        [initialId]: {
+                            id: initialId,
+                            url: localData.url,
+                            thumbUrl: localData.url,
+                            filename: localData.filename || "Uploading...",
+                            mimeType: localData.mimeType || "image/jpeg",
+                            sizeBytes: localData.sizeBytes || 0,
+                            width: null,
+                            height: null,
+                            isLiked: false,
+                            blurhash: null,
+                            takenAt: null,
+                            cameraMake: null,
+                            cameraModel: null,
+                            lensModel: null,
+                            focalLength: null,
+                            aperture: null,
+                            iso: null,
+                            shutterSpeed: null,
+                            gpsLat: null,
+                            gpsLng: null,
+                            createdAt: localData.createdAt || new Date().toISOString(),
+                        },
+                    });
+                } catch (e) { console.error(e); }
+            }
+            setIdList([initialId]);
+            setCurrentIndex(0);
+            setLoading(false);
+            return;
+        }
+
         const stored = sessionStorage.getItem("current_gallery_context");
         if (stored) {
             try {
@@ -74,11 +114,11 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
             setIdList([initialId]);
             setCurrentIndex(0);
         }
-    }, [initialId]);
+    }, [initialId, isLocalPhoto]);
 
     // Preloading Logic
     const preload = useCallback(async (id: string) => {
-        if (!id || photos[id]) return;
+        if (!id || photos[id] || id.startsWith("local:")) return;
         try {
             const data = await PhotoDetailCache.fetchAndCache(id);
             if (data) {
@@ -237,19 +277,23 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                                 <ArrowLeft size={24} />
                             </button>
                             <div style={{ display: "flex", gap: "0.5rem" }}>
-                                <button onClick={toggleLike} style={btnStyle}>
-                                    <Heart size={22} color={photo?.isLiked ? "#ff4d6a" : "#fff"}
-                                        fill={photo?.isLiked ? "#ff4d6a" : "none"} strokeWidth={2} />
-                                </button>
-                                <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
-                                    <Info size={22} />
-                                </button>
-                                <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
-                                    <Download size={22} />
-                                </button>
-                                <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
-                                    <Trash2 size={22} />
-                                </button>
+                                {!isLocalPhoto && (
+                                    <>
+                                        <button onClick={toggleLike} style={btnStyle}>
+                                            <Heart size={22} color={photo?.isLiked ? "#ff4d6a" : "#fff"}
+                                                fill={photo?.isLiked ? "#ff4d6a" : "none"} strokeWidth={2} />
+                                        </button>
+                                        <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
+                                            <Info size={22} />
+                                        </button>
+                                        <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
+                                            <Download size={22} />
+                                        </button>
+                                        <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
+                                            <Trash2 size={22} />
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         </div>
 
@@ -503,6 +547,12 @@ function ZoomableImage({ id, src, thumbUrl, alt, isCurrent }: {
     useEffect(() => { if (!isCurrent) setScale(1); }, [isCurrent]);
 
     useEffect(() => {
+        // For local photos, use the src directly (it's a blob URL)
+        if (id.startsWith("local:")) {
+            setBlobUrl(src);
+            return;
+        }
+
         const controller = new AbortController();
         const signal = controller.signal;
 
