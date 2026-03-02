@@ -22,6 +22,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
+    // Skip cross-origin requests (B2 storage, Supabase, etc.) to avoid CORS issues
+    if (!event.request.url.startsWith(self.location.origin)) return;
     event.respondWith(
         caches.match(event.request).then((cached) => {
             const fetched = fetch(event.request).then((response) => {
@@ -32,6 +34,6 @@ self.addEventListener('fetch', (event) => {
                 return response;
             }).catch(() => cached);
             return cached || fetched;
-        })
+        }).catch(() => fetch(event.request))
     );
 });

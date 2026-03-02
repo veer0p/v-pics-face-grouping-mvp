@@ -5,8 +5,6 @@ import { PhotoMetadataCache, PhotoDetailCache, type Photo } from "./photo-cache"
 import { useAuth } from "@/components/AuthContext";
 
 type UseRealtimePhotosOptions = {
-    /** Current photos state */
-    photos: Photo[];
     /** Setter to update the photos list */
     setPhotos: React.Dispatch<React.SetStateAction<Photo[]>>;
     /** Whether realtime should be active */
@@ -19,15 +17,9 @@ type UseRealtimePhotosOptions = {
  * - UPDATE  → updates the photo in-place (e.g. is_liked, is_deleted)
  * - DELETE  → removes the photo from the list
  */
-export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseRealtimePhotosOptions) {
+export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhotosOptions) {
     const channelRef = useRef<RealtimeChannel | null>(null);
-    const photosRef = useRef<Photo[]>(photos);
     const { user, loading: authLoading } = useAuth();
-
-    // Keep photosRef in sync with the latest prop
-    useEffect(() => {
-        photosRef.current = photos;
-    }, [photos]);
 
     useEffect(() => {
         if (!enabled || authLoading || !user) return;
@@ -42,6 +34,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                 async (payload: { new: any }) => {
                     const row = payload.new;
                     if (row.is_deleted) return;
+                    if (row.user_id && row.user_id !== user.id) return;
 
                     try {
                         const res = await fetch(`/api/photos/${row.id}`);
@@ -67,6 +60,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                 { event: "UPDATE", schema: "public", table: "photos" },
                 async (payload: { new: any }) => {
                     const row = payload.new;
+                    if (row.user_id && row.user_id !== user.id) return;
 
                     // If soft-deleted, remove from the list
                     if (row.is_deleted) {
@@ -96,6 +90,7 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
                 { event: "DELETE", schema: "public", table: "photos" },
                 async (payload: { old: any }) => {
                     const row = payload.old;
+                    if (row.user_id && row.user_id !== user.id) return;
                     setPhotos((prev) => prev.filter((p) => p.id !== row.id));
                     // Invalidate cache
                     await PhotoMetadataCache.clear();
@@ -113,5 +108,5 @@ export function useRealtimePhotos({ photos, setPhotos, enabled = true }: UseReal
             supabase.removeChannel(channel);
             channelRef.current = null;
         };
-    }, [enabled, setPhotos]);
+    }, [enabled, setPhotos, authLoading, user?.id]);
 }

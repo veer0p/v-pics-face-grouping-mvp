@@ -1,14 +1,15 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-    Upload, X, CheckCircle, AlertTriangle, Loader,
+    Upload, CheckCircle, AlertTriangle, Loader,
     RefreshCw, SkipForward
 } from "lucide-react";
 import * as fflate from "fflate";
 import { extractBrowserExif, uploadToB2, calculateHash, testB2Connectivity, generateThumbnail } from "@/lib/upload-utils";
+import { PhotoMetadataCache } from "@/lib/photo-cache";
 
 type FileEntry = {
     id: string;
@@ -19,10 +20,39 @@ type FileEntry = {
     status: "pending" | "processing" | "uploading" | "done" | "error" | "duplicate";
     progress: number;
     error?: string;
-    hash?: string;
 };
 
 const CONCURRENT_UPLOADS = 4;
+const MAX_QUEUE_SIZE = 3000;
+const ZIP_ENTRY_YIELD_STEP = 40;
+
+const makeId = () => `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
+const getUploadConcurrency = () => {
+    if (typeof navigator === "undefined") return CONCURRENT_UPLOADS;
+    const cpu = navigator.hardwareConcurrency || CONCURRENT_UPLOADS;
+    return Math.min(8, Math.max(3, Math.floor(cpu / 2)));
+};
+
+const getFileSignature = (name: string, size: number) => `${name}|${size}`;
+const getMimeFromExt = (name: string) => {
+    const ext = name.split(".").pop()?.toLowerCase();
+    if (["jpg", "jpeg"].includes(ext || "")) return "image/jpeg";
+    if (ext === "png") return "image/png";
+    if (ext === "webp") return "image/webp";
+    if (ext === "heic") return "image/heic";
+    return "application/octet-stream";
+};
+
+const buildEntry = (file: File, displayName?: string): FileEntry => ({
+    id: makeId(),
+    file,
+    name: displayName || file.name,
+    size: file.size,
+    preview: URL.createObjectURL(file),
+    status: "pending",
+    progress: 0,
+});
 
 export default function UploadPage() {
     const router = useRouter();
@@ -34,106 +64,121 @@ export default function UploadPage() {
     const [b2Status, setB2Status] = useState<"idle" | "testing" | "ok" | "fail">("idle");
     const [b2Error, setB2Error] = useState<string | null>(null);
 
+    const processZip = useCallback(async (zipFile: File): Promise<FileEntry[]> => {
+        // SAFETY: browser-side extraction still needs an upper bound.
+        if (zipFile.size > 2 * 1024 * 1024 * 1024) {
+            alert(`ZIP file "${zipFile.name}" is too large (2GB+) for browser extraction. Please unzip it locally and upload the folder.`);
+            return [];
+        }
+
+        try {
+            const zipBuffer = new Uint8Array(await zipFile.arrayBuffer());
+            const unzipped = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+                fflate.unzip(zipBuffer, (err, data) => {
+                    if (err || !data) {
+                        reject(err || new Error("ZIP extraction failed."));
+                        return;
+                    }
+                    resolve(data as Record<string, Uint8Array>);
+                });
+            });
+
+            const extracted: FileEntry[] = [];
+            let processed = 0;
+
+            for (const [name, data] of Object.entries(unzipped)) {
+                processed += 1;
+                if (processed % ZIP_ENTRY_YIELD_STEP === 0) {
+                    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                }
+
+                if (name.includes("__MACOSX") || name.endsWith("/")) continue;
+                const mime = getMimeFromExt(name);
+                if (!mime.startsWith("image/")) continue;
+
+                const blob = new Blob([data], { type: mime });
+                const file = new File([blob], name.split("/").pop() || name, { type: mime });
+                extracted.push(buildEntry(file, name));
+            }
+
+            return extracted;
+        } catch (err) {
+            console.error("ZIP Error:", err);
+            alert(`Failed to extract ZIP: ${err instanceof Error ? err.message : String(err)}`);
+            return [];
+        }
+    }, []);
+
     const addFiles = useCallback(async (incoming: FileList | File[]) => {
-        const newEntries: FileEntry[] = [];
+        const nextEntries: FileEntry[] = [];
 
         for (const file of Array.from(incoming)) {
-            // Handle ZIP
-            const isZip = file.name.toLowerCase().endsWith(".zip") ||
+            const isZip =
+                file.name.toLowerCase().endsWith(".zip") ||
                 file.type === "application/zip" ||
                 file.type.includes("zip");
 
             if (isZip) {
                 const zipEntries = await processZip(file);
-                newEntries.push(...zipEntries);
+                nextEntries.push(...zipEntries);
+                continue;
             }
-            // Handle Images
-            else if (file.type.startsWith("image/")) {
-                newEntries.push({
-                    id: Math.random().toString(36).substring(7),
-                    file,
-                    name: file.name,
-                    size: file.size,
-                    preview: URL.createObjectURL(file),
-                    status: "pending",
-                    progress: 0,
-                });
+
+            if (file.type.startsWith("image/")) {
+                nextEntries.push(buildEntry(file));
             }
         }
-        setEntries((prev) => [...prev, ...newEntries]);
-    }, []);
 
-    const processZip = async (zipFile: File): Promise<FileEntry[]> => {
-        // SAFETY: 2GB+ ZIP files will crash browser memory if unzipped via fflate sync
-        if (zipFile.size > 2 * 1024 * 1024 * 1024) {
-            alert(`ZIP file "${zipFile.name}" is too large (2GB+) for browser-side extraction. Please unzip it locally and drag the folder instead.`);
-            return [];
-        }
+        if (nextEntries.length === 0) return;
 
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-                try {
-                    const buf = new Uint8Array(reader.result as ArrayBuffer);
-                    const unzipped = fflate.unzipSync(buf);
-                    const entries: FileEntry[] = [];
+        setEntries((prev) => {
+            const signatures = new Set(prev.map((entry) => getFileSignature(entry.name, entry.size)));
+            const deduped: FileEntry[] = [];
 
-                    for (const [name, data] of Object.entries(unzipped)) {
-                        if (name.includes("__MACOSX") || name.endsWith("/")) continue;
-                        const mime = getMimeFromExt(name);
-                        if (!mime.startsWith("image/")) continue;
-
-                        const blob = new Blob([data as any], { type: mime });
-                        const file = new File([blob], name, { type: mime });
-
-                        entries.push({
-                            id: Math.random().toString(36).substring(7),
-                            file,
-                            name,
-                            size: file.size,
-                            preview: URL.createObjectURL(file),
-                            status: "pending",
-                            progress: 0,
-                        });
-                    }
-                    resolve(entries);
-                } catch (err) {
-                    console.error("ZIP Error:", err);
-                    alert(`Failed to extract ZIP: ${err instanceof Error ? err.message : String(err)}`);
-                    resolve([]);
+            for (const entry of nextEntries) {
+                const signature = getFileSignature(entry.name, entry.size);
+                if (signatures.has(signature)) {
+                    if (entry.preview) URL.revokeObjectURL(entry.preview);
+                    continue;
                 }
-            };
-            reader.onerror = () => resolve([]);
-            reader.readAsArrayBuffer(zipFile);
-        });
-    };
+                signatures.add(signature);
+                deduped.push(entry);
+            }
 
-    const getMimeFromExt = (name: string) => {
-        const ext = name.split(".").pop()?.toLowerCase();
-        if (["jpg", "jpeg"].includes(ext!)) return "image/jpeg";
-        if (ext === "png") return "image/png";
-        if (ext === "webp") return "image/webp";
-        if (ext === "heic") return "image/heic";
-        return "application/octet-stream";
-    };
+            const remainingSlots = Math.max(MAX_QUEUE_SIZE - prev.length, 0);
+            const accepted = deduped.slice(0, remainingSlots);
+            const dropped = deduped.slice(remainingSlots);
+
+            for (const entry of dropped) {
+                if (entry.preview) URL.revokeObjectURL(entry.preview);
+            }
+
+            if (dropped.length > 0) {
+                alert(`Upload queue is capped at ${MAX_QUEUE_SIZE} files. ${dropped.length} file(s) were skipped.`);
+            }
+
+            return [...prev, ...accepted];
+        });
+    }, [processZip]);
 
     const runUpload = async (queue: FileEntry[]) => {
+        if (queue.length === 0) return;
+
         setUploading(true);
         setStats(s => ({ ...s, total: s.total + queue.length }));
-
-        let activeCount = 0;
+        const concurrency = Math.min(getUploadConcurrency(), queue.length);
         let index = 0;
+        let localErrors = 0;
 
-        const processNext = async () => {
-            if (index >= queue.length) return;
+        const uploadOne = async (entry: FileEntry) => {
+            updateStatus(entry.id, "processing", 10, undefined);
 
-            const entry = queue[index++];
-            activeCount++;
+            let originalKey: string | undefined;
+            let thumbKey: string | undefined;
 
             try {
                 // 1. SHA-256 Hashing & EXIF (Parallel)
                 // Hashing for large files is now memory-safe (Quick Fingerprint)
-                updateStatus(entry.id, "processing", 10);
                 const [hash, exif] = await Promise.all([
                     calculateHash(entry.file).catch(() => null),
                     extractBrowserExif(entry.file).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 }))
@@ -143,7 +188,10 @@ export default function UploadPage() {
                 updateStatus(entry.id, "processing", 30);
                 const preRes = await fetch(`/api/upload/presign?filename=${encodeURIComponent(entry.name)}&type=${entry.file.type}`);
                 if (!preRes.ok) throw new Error(`Presign API Error: ${preRes.status}`);
-                const { originalKey, thumbKey, uploadUrl, thumbUploadUrl, fileId } = await preRes.json();
+                const presigned = await preRes.json();
+                originalKey = presigned.originalKey;
+                thumbKey = presigned.thumbKey;
+                const { uploadUrl, thumbUploadUrl, fileId } = presigned;
 
                 // 3. Direct Upload to B2 (Original + Thumbnail)
                 updateStatus(entry.id, "uploading", 30);
@@ -170,7 +218,7 @@ export default function UploadPage() {
                     await fetch("/api/upload/cleanup", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ originalKey, thumbKey }),
+                        body: JSON.stringify({ originalKey: originalKey || null, thumbKey: thumbKey || null }),
                     }).catch(() => { }); // Ignore cleanup errors
                     throw new Error(`B2 Upload Failure (CORS or Network): ${err.message}`);
                 });
@@ -207,7 +255,7 @@ export default function UploadPage() {
                     await fetch("/api/upload/cleanup", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ originalKey, thumbKey }),
+                        body: JSON.stringify({ originalKey: originalKey || null, thumbKey: thumbKey || null }),
                     }).catch(() => { });
 
                     throw new Error(`DB Completion Error: ${compData.error || compRes.status}`);
@@ -215,19 +263,30 @@ export default function UploadPage() {
 
                 updateStatus(entry.id, "done", 100);
                 setStats(s => ({ ...s, done: s.done + 1 }));
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error(`Upload error for ${entry.name}:`, err);
-                updateStatus(entry.id, "error", 0, err.message || String(err));
+                const message = err instanceof Error ? err.message : String(err);
+                updateStatus(entry.id, "error", 0, message);
                 setStats(s => ({ ...s, errors: s.errors + 1 }));
-            } finally {
-                activeCount--;
-                processNext();
+                localErrors += 1;
             }
         };
 
-        // Start initial batch
-        for (let i = 0; i < Math.min(CONCURRENT_UPLOADS, queue.length); i++) {
-            processNext();
+        const worker = async () => {
+            while (true) {
+                const current = queue[index++];
+                if (!current) break;
+                await uploadOne(current);
+            }
+        };
+
+        await Promise.all(Array.from({ length: concurrency }, () => worker()));
+        setUploading(false);
+
+        if (localErrors === 0) {
+            await PhotoMetadataCache.clear();
+            await PhotoMetadataCache.setHash("");
+            router.push("/?fresh=1");
         }
     };
 
@@ -237,43 +296,49 @@ export default function UploadPage() {
 
         // Reset local run stats
         setStats({ done: 0, total: 0, errors: 0, duplicates: 0 });
-        runUpload(pending);
+        void runUpload(pending);
     };
 
     const retryFile = (id: string) => {
         const entry = entries.find(e => e.id === id);
-        if (entry) runUpload([entry]);
+        if (!entry) return;
+
+        updateStatus(entry.id, "pending", 0, undefined);
+        setStats({ done: 0, total: 0, errors: 0, duplicates: 0 });
+        void runUpload([{ ...entry, status: "pending", progress: 0, error: undefined }]);
     };
 
     const updateStatus = (id: string, status: FileEntry["status"], progress: number, error?: string) => {
         setEntries(prev => prev.map(e => e.id === id ? { ...e, status, progress, error } : e));
     };
 
-    useEffect(() => {
-        if (uploading && stats.done + stats.errors + stats.duplicates === stats.total && stats.total > 0) {
-            setUploading(false);
-            if (stats.errors === 0) {
-                setTimeout(() => router.push("/"), 2000);
+    const clearEntries = () => {
+        setEntries((prev) => {
+            for (const entry of prev) {
+                if (entry.preview) URL.revokeObjectURL(entry.preview);
             }
-        }
-    }, [stats, uploading, router]);
+            return [];
+        });
+        setStats({ done: 0, total: 0, errors: 0, duplicates: 0 });
+    };
 
+    const actionableCount = entries.filter((entry) => entry.status === "pending" || entry.status === "error").length;
     const globalProgress = stats.total > 0 ? ((stats.done + stats.duplicates) / stats.total) * 100 : 0;
 
     return (
         <div className="page-shell">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
                 <div>
-                    <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.5rem" }}>Bulk Export</h1>
+                    <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.5rem" }}>Bulk Upload</h1>
                     <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>Direct-to-B2 with De-duplication</p>
                 </div>
                 {entries.length > 0 && !uploading && (
-                    <button className="btn btn-ghost btn-sm" onClick={() => { setEntries([]); setStats({ done: 0, total: 0, errors: 0, duplicates: 0 }); }}>Clear</button>
+                    <button className="btn btn-ghost btn-sm" onClick={clearEntries}>Clear</button>
                 )}
             </div>
 
             {/* B2 Connection Tester */}
-            <div style={{
+            {/* <div style={{
                 marginBottom: "1rem", padding: "0.75rem", borderRadius: "var(--r-md)",
                 background: b2Status === "ok" ? "rgba(16,185,129,0.1)" : b2Status === "fail" ? "rgba(239,68,68,0.1)" : "var(--bg-subtle)",
                 border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between"
@@ -306,7 +371,7 @@ export default function UploadPage() {
                 >
                     Test Storage
                 </button>
-            </div>
+            </div> */}
 
             {b2Status === "fail" && (
                 <div style={{
@@ -354,7 +419,10 @@ export default function UploadPage() {
                         zipInput.type = 'file';
                         zipInput.multiple = true;
                         zipInput.accept = '.zip,application/zip';
-                        zipInput.onchange = (ev: any) => addFiles(ev.target.files);
+                        zipInput.onchange = (ev) => {
+                            const target = ev.target as HTMLInputElement | null;
+                            if (target?.files) addFiles(target.files);
+                        };
                         zipInput.click();
                     }}>
                         Select ZIP
@@ -459,7 +527,7 @@ export default function UploadPage() {
             {!uploading && entries.some(e => e.status === "pending" || e.status === "error") && (
                 <div style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom))", left: 16, right: 16, zIndex: 100 }}>
                     <button className="btn btn-primary" style={{ width: "100%", height: 50, fontSize: "0.95rem" }} onClick={handleUpload}>
-                        {entries.some(e => e.status === "error") ? "Retry Failed Uploads" : `Start Uploading ${entries.length} Files`}
+                        {entries.some(e => e.status === "error") ? "Retry Failed Uploads" : `Start Uploading ${actionableCount} Files`}
                     </button>
                 </div>
             )}

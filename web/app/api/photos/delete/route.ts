@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
             const { data: photos, error: fetchError } = await supabase
                 .from("photos")
                 .select("id, original_key, thumb_key")
-                .in("id", ids);
+                .in("id", ids)
+                .eq("user_id", user.id);
 
             if (fetchError) {
                 console.error("[Delete API] DB Fetch Error:", fetchError);
@@ -55,7 +56,11 @@ export async function POST(req: NextRequest) {
             }
 
             // Remove from DB permanently
-            const { error: dbError } = await supabase.from("photos").delete().in("id", ids);
+            const { error: dbError } = await supabase
+                .from("photos")
+                .delete()
+                .in("id", ids)
+                .eq("user_id", user.id);
             if (dbError) {
                 console.error("[Delete API] DB Delete Error:", dbError);
                 return NextResponse.json({ error: "DB delete error" }, { status: 500 });
@@ -71,7 +76,8 @@ export async function POST(req: NextRequest) {
                     is_deleted: true,
                     deleted_at: new Date().toISOString()
                 })
-                .in("id", ids);
+                .in("id", ids)
+                .eq("user_id", user.id);
 
             if (softError) {
                 console.error("[Delete API] Soft Delete Error:", softError);

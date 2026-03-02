@@ -1,7 +1,7 @@
 "use client";
 // Forced rebuild for PIN-auth transition
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 type UserProfile = {
@@ -15,6 +15,8 @@ type AuthContextType = {
     loading: boolean;
     signInWithPin: (pin: string) => Promise<boolean>;
     signOut: () => Promise<void>;
+    refreshUser: () => Promise<void>;
+    updateUser: (patch: Partial<UserProfile>) => void;
 };
 
 const AuthContext = createContext<AuthContextType>({
@@ -22,6 +24,8 @@ const AuthContext = createContext<AuthContextType>({
     loading: true,
     signInWithPin: async () => false,
     signOut: async () => { },
+    refreshUser: async () => { },
+    updateUser: () => { },
 });
 
 const COOKIE_NAME = "v-pics-session";
@@ -30,6 +34,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const supabase = getSupabaseBrowser();
+
+    const fetchUserById = useCallback(async (userId: string) => {
+        const { data, error } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", userId)
+            .single();
+        if (error || !data) return null;
+        return data as UserProfile;
+    }, [supabase]);
 
     // Helper to get cookie
     const getCookie = (name: string) => {
@@ -59,18 +73,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const userId = getCookie(COOKIE_NAME);
             if (userId) {
                 try {
-                    const { data, error } = await supabase
-                        .from("users")
-                        .select("*")
-                        .eq("id", userId)
-                        .single();
-
-                    if (data && !error) {
-                        setUser(data);
+                    const profile = await fetchUserById(userId);
+                    if (profile) {
+                        setUser(profile);
                     } else {
                         removeCookie(COOKIE_NAME);
                     }
-                } catch (e) {
+                } catch {
                     removeCookie(COOKIE_NAME);
                 }
             }
@@ -78,7 +87,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         };
 
         checkSession();
-    }, [supabase]);
+    }, [fetchUserById]);
 
     const signInWithPin = async (pin: string) => {
         setLoading(true);
@@ -108,8 +117,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setLoading(false);
     };
 
+    const refreshUser = async () => {
+        const userId = getCookie(COOKIE_NAME);
+        if (!userId) {
+            setUser(null);
+            return;
+        }
+        const profile = await fetchUserById(userId);
+        if (profile) {
+            setUser(profile);
+        }
+    };
+
+    const updateUser = (patch: Partial<UserProfile>) => {
+        setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+    };
+
     return (
-        <AuthContext.Provider value={{ user, loading, signInWithPin, signOut }}>
+        <AuthContext.Provider value={{ user, loading, signInWithPin, signOut, refreshUser, updateUser }}>
             {children}
         </AuthContext.Provider>
     );

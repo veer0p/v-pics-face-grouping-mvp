@@ -16,6 +16,7 @@ export default function HomePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
+    const forceFreshLoad = searchParams.get("fresh") === "1";
 
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [loading, setLoading] = useState(true);
@@ -36,9 +37,14 @@ export default function HomePage() {
     const selectMode = selected.size > 0;
 
     // Realtime subscription
-    useRealtimePhotos({ photos, setPhotos, enabled: !loading });
+    useRealtimePhotos({ setPhotos, enabled: !loading });
 
-    const fetchPhotos = useCallback(async (offset = 0, append = false) => {
+    const fetchPhotos = useCallback(async (
+        offset = 0,
+        append = false,
+        options?: { forceNetwork?: boolean }
+    ) => {
+        const forceNetwork = !!options?.forceNetwork;
         if (offset === 0) setLoading(true);
         else setLoadingMore(true);
         setError(null);
@@ -48,7 +54,12 @@ export default function HomePage() {
             const localHash = await PhotoMetadataCache.getHash();
             const cached = await PhotoMetadataCache.get(offset);
 
-            if (offset === 0 && localHash && !refreshing) {
+            if (offset === 0 && forceNetwork) {
+                await PhotoMetadataCache.clear();
+                await PhotoMetadataCache.setHash("");
+            }
+
+            if (offset === 0 && localHash && !refreshing && !forceNetwork) {
                 // Check if collection has changed via server-side hash
                 const checkRes = await fetch(`/api/photos?hash=${localHash}&limit=${PAGE_SIZE}&offset=0`);
                 const data = await checkRes.json();
@@ -72,7 +83,8 @@ export default function HomePage() {
             }
 
             // 2. Network Fetch (Cache miss or Hash mismatch)
-            const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}&hash=${localHash || ""}`;
+            const hashForRequest = forceNetwork ? "" : (localHash || "");
+            const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}&hash=${hashForRequest}`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("Failed to fetch photos");
             const data = await res.json();
@@ -102,11 +114,19 @@ export default function HomePage() {
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [refreshing, photos.length, PAGE_SIZE]);
+    }, [refreshing]);
 
     useEffect(() => {
-        fetchPhotos(0, false);
-    }, [fetchPhotos, filter]);
+        fetchPhotos(0, false, { forceNetwork: forceFreshLoad });
+    }, [fetchPhotos, filter, forceFreshLoad]);
+
+    useEffect(() => {
+        if (!forceFreshLoad) return;
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("fresh");
+        const next = params.toString();
+        router.replace(next ? `/?${next}` : "/", { scroll: false });
+    }, [forceFreshLoad, router, searchParams]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {

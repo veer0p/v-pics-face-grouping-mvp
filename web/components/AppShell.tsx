@@ -1,8 +1,9 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Search, Settings, LogOut, Heart } from "lucide-react";
+import { Settings, LogOut, Heart } from "lucide-react";
 import { useAuth } from "@/components/AuthContext";
 import { BottomNav } from "@/components/BottomNav";
 import { FloatingUploadButton } from "@/components/FloatingUploadButton";
@@ -89,7 +90,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                 aria-label="Account"
                                 onClick={() => setShowMenu(!showMenu)}
                             >
-                                <div className="app-avatar-inner" />
+                                {user?.avatar_url ? (
+                                    <img
+                                        src={user.avatar_url}
+                                        alt="Profile"
+                                        style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
+                                    />
+                                ) : (
+                                    <div className="app-avatar-inner" />
+                                )}
                                 {user && (
                                     <div style={{
                                         position: "absolute",

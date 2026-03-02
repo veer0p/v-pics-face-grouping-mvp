@@ -17,6 +17,7 @@ export async function GET(
             .from("photos")
             .select("*")
             .eq("id", id)
+            .eq("user_id", user.id)
             .eq("is_deleted", false)
             .single();
 

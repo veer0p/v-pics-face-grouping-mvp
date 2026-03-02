@@ -385,23 +385,22 @@ export const ImageBlobCache = {
             return cachedUrl;
         }
 
-        // 2. Fetch from network
-        console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
-
-        let fetchUrl = url;
-        // If it's a B2 URL, route through our proxy to bypass CORS
-        if (url.includes('backblazeb2.com')) {
-            fetchUrl = `/api/photos/proxy?url=${encodeURIComponent(url)}`;
+        // 2. Dedup: join in-flight fetch if one exists
+        if (inFlightImageFetches.has(key)) {
+            return inFlightImageFetches.get(key)!;
         }
 
-        const res = await fetch(fetchUrl);
-        if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-        const blob = await res.blob();
+        // 3. Fetch from network (proxy B2 URLs to bypass CORS)
+        console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
 
-        // 3. Fetch from network
         const fetchPromise = (async () => {
             try {
-                const res = await fetch(url, { signal });
+                let fetchUrl = url;
+                if (url.includes('backblazeb2.com')) {
+                    fetchUrl = `/api/photos/proxy?url=${encodeURIComponent(url)}`;
+                }
+
+                const res = await fetch(fetchUrl, { signal });
                 if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
                 const blob = await res.blob();
 

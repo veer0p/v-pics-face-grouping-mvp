@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 
 // Restore soft-deleted photos
 export async function POST(req: NextRequest) {
     try {
+        const user = await getAuthenticatedProfile();
+        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
         const { ids } = await req.json();
         if (!ids || !Array.isArray(ids) || ids.length === 0) {
             return NextResponse.json({ error: "No ids" }, { status: 400 });
@@ -13,7 +16,8 @@ export async function POST(req: NextRequest) {
         const { error } = await supabase
             .from("photos")
             .update({ is_deleted: false })
-            .in("id", ids);
+            .in("id", ids)
+            .eq("user_id", user.id);
 
         if (error) return NextResponse.json({ error: "DB error" }, { status: 500 });
         return NextResponse.json({ ok: true, restored: ids.length });

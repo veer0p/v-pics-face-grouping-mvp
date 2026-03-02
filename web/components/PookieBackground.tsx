@@ -28,7 +28,7 @@ export const PookieBackground: React.FC<{ accentIndex?: number }> = ({ accentInd
         const emojiSets = [
             ["❤️", "✨", "🌸", "🎀", "🍓", "🍭"], // Strawberry
             ["✨", "💜", "🌌", "🦄", "🌙", "🪁"], // Lavender
-            ["🍑", "🍊", "☀️", "✨", "🍦", "🎈"], // Peach
+            ["🎃", "🍊", "☀️", "✨", "🍦", "🎈"], // Peach
             ["🍃", "🌿", "🍀", "✨", "🍏", "🍵"], // Mint
             ["☁️", "✈️", "✨", "💙", "🪁", "🎈"], // Sky
         ];

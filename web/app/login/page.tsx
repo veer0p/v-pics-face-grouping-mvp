@@ -78,7 +78,7 @@ export default function LoginPage() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: "var(--bg)",
+            backgroundColor: "var(--bg)",
             backgroundImage: resolved === "dark"
                 ? "radial-gradient(circle at center, var(--bg-subtle) 0%, var(--bg) 100%)"
                 : "none",

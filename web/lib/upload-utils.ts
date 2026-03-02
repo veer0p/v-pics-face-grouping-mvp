@@ -114,44 +114,69 @@ export async function extractBrowserExif(file: File): Promise<{
  * Resizes to THUMB_MAX while maintaining aspect ratio.
  */
 export async function generateThumbnail(file: File, maxDim = 400): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                let { width, height } = img;
+    const fitInside = (width: number, height: number) => {
+        if (width <= maxDim && height <= maxDim) return { width, height };
+        if (width > height) {
+            return { width: maxDim, height: Math.max(1, Math.round((height * maxDim) / width)) };
+        }
+        return { width: Math.max(1, Math.round((width * maxDim) / height)), height: maxDim };
+    };
 
-                if (width > height) {
-                    if (width > maxDim) {
-                        height *= maxDim / width;
-                        width = maxDim;
-                    }
-                } else {
-                    if (height > maxDim) {
-                        width *= maxDim / height;
-                        height = maxDim;
-                    }
-                }
+    const renderBlob = (draw: (ctx: CanvasRenderingContext2D, width: number, height: number) => void, width: number, height: number) =>
+        new Promise<Blob>((resolve, reject) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+                reject(new Error("Failed to get canvas context"));
+                return;
+            }
 
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext("2d");
-                if (!ctx) return reject(new Error("Failed to get canvas context"));
+            draw(ctx, width, height);
 
-                ctx.drawImage(img, 0, 0, width, height);
+            canvas.toBlob((blob) => {
+                if (blob) resolve(blob);
+                else reject(new Error("Canvas toBlob failed"));
+            }, "image/webp", 0.8);
+        });
 
-                // Try to export as webp, fallback to jpeg
-                canvas.toBlob((blob) => {
-                    if (blob) resolve(blob);
-                    else reject(new Error("Canvas toBlob failed"));
-                }, "image/webp", 0.8);
-            };
-            img.onerror = () => reject(new Error("Failed to load image for thumbnail"));
-            img.src = e.target?.result as string;
+    if (typeof createImageBitmap === "function") {
+        const bitmap = await createImageBitmap(file);
+        const { width, height } = fitInside(bitmap.width, bitmap.height);
+        try {
+            return await renderBlob((ctx, w, h) => {
+                ctx.drawImage(bitmap, 0, 0, w, h);
+            }, width, height);
+        } finally {
+            bitmap.close();
+        }
+    }
+
+    return await new Promise<Blob>((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+
+        img.onload = async () => {
+            try {
+                const { width, height } = fitInside(img.naturalWidth, img.naturalHeight);
+                const blob = await renderBlob((ctx, w, h) => {
+                    ctx.drawImage(img, 0, 0, w, h);
+                }, width, height);
+                resolve(blob);
+            } catch (err) {
+                reject(err);
+            } finally {
+                URL.revokeObjectURL(url);
+            }
         };
-        reader.onerror = () => reject(new Error("Failed to read file for thumbnail"));
-        reader.readAsDataURL(file);
+
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("Failed to load image for thumbnail"));
+        };
+
+        img.src = url;
     });
 }
 
@@ -225,4 +250,3 @@ export async function testB2Connectivity(): Promise<{ ok: boolean; error?: strin
         return { ok: false, error: err.message };
     }
 }
-
