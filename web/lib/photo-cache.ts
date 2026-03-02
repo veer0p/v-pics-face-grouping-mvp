@@ -18,6 +18,7 @@ export type Photo = {
     isLiked: boolean;
     takenAt: string | null;
     createdAt: string;
+    contentHash?: string | null;
 };
 
 // Quotas in bytes

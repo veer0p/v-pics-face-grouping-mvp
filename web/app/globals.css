@@ -2632,6 +2632,7 @@ img {
     border-radius: var(--r-md);
     font-size: 0.95rem;
     font-weight: 600;
+    color: var(--ink);
     cursor: pointer;
     text-align: left;
     transition: all 150ms ease;

@@ -55,6 +55,7 @@ export async function GET(
                 orientation: photo.orientation,
                 exifRaw: photo.exif_raw,
                 createdAt: photo.created_at,
+                contentHash: photo.content_hash,
             },
         });
     } catch {

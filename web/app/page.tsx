@@ -4,17 +4,41 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-    Upload, Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus,
+    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, AlertTriangle,
 } from "lucide-react";
 import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
 import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
+import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
 
 const PAGE_SIZE = 40;
+
+type LocalGalleryPhoto = {
+    kind: "local";
+    id: string;
+    localId: string;
+    url: string;
+    thumbUrl: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    isLiked: false;
+    takenAt: string | null;
+    createdAt: string;
+    status: PendingUploadItem["status"];
+    progress: number;
+    error: string | null;
+    attempts: number;
+    contentHash: string | null;
+};
+
+type ServerGalleryPhoto = Photo & { kind: "server" };
+type GalleryPhoto = ServerGalleryPhoto | LocalGalleryPhoto;
 
 export default function HomePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { pendingItems, retry, remove, reconcileWithServerPhotos } = useUploadQueue();
     const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
     const forceFreshLoad = searchParams.get("fresh") === "1";
 
@@ -33,8 +57,36 @@ export default function HomePage() {
     const pullStart = useRef(0);
     const [pullOffset, setPullOffset] = useState(0);
     const observerRef = useRef<HTMLDivElement>(null);
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressTriggered = useRef(false);
 
     const selectMode = selected.size > 0;
+
+    const clearLongPress = useCallback(() => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }, []);
+
+    const startLongPress = useCallback((photoId: string) => {
+        clearLongPress();
+        longPressTriggered.current = false;
+        longPressTimer.current = setTimeout(() => {
+            longPressTriggered.current = true;
+            // Haptic feedback if available
+            if (navigator.vibrate) navigator.vibrate(30);
+            setSelected((prev) => {
+                const next = new Set(prev);
+                next.has(photoId) ? next.delete(photoId) : next.add(photoId);
+                return next;
+            });
+        }, 500);
+    }, [clearLongPress]);
+
+    const cancelLongPress = useCallback(() => {
+        clearLongPress();
+    }, [clearLongPress]);
 
     // Realtime subscription
     useRealtimePhotos({ setPhotos, enabled: !loading });
@@ -119,6 +171,28 @@ export default function HomePage() {
     useEffect(() => {
         fetchPhotos(0, false, { forceNetwork: forceFreshLoad });
     }, [fetchPhotos, filter, forceFreshLoad]);
+
+    useEffect(() => {
+        void reconcileWithServerPhotos(
+            photos.map((photo) => ({
+                id: photo.id,
+                contentHash: photo.contentHash || null,
+            })),
+        );
+    }, [photos, reconcileWithServerPhotos]);
+
+    const uploadedPendingCount = useMemo(
+        () => pendingItems.filter((item) => item.status === "uploaded").length,
+        [pendingItems],
+    );
+
+    useEffect(() => {
+        if (uploadedPendingCount === 0) return;
+        const timer = window.setInterval(() => {
+            void fetchPhotos(0, false, { forceNetwork: true });
+        }, 3000);
+        return () => window.clearInterval(timer);
+    }, [uploadedPendingCount, fetchPhotos]);
 
     useEffect(() => {
         if (!forceFreshLoad) return;
@@ -263,20 +337,58 @@ export default function HomePage() {
         }
     };
 
-    const filteredPhotos = useMemo(() => {
-        return filter === "favorites" ? photos.filter((p) => p.isLiked) : photos;
-    }, [photos, filter]);
+    const serverPhotos = useMemo<ServerGalleryPhoto[]>(() => {
+        return photos.map((photo) => ({ ...photo, kind: "server" }));
+    }, [photos]);
 
-    const sortedPhotos = useMemo(() => {
-        return [...filteredPhotos].sort((a, b) => {
+    const localPendingPhotos = useMemo<LocalGalleryPhoto[]>(() => {
+        return pendingItems.map((item) => ({
+            kind: "local",
+            id: `local:${item.localId}`,
+            localId: item.localId,
+            url: item.previewUrl,
+            thumbUrl: item.previewUrl,
+            filename: item.filename,
+            mimeType: item.mimeType,
+            sizeBytes: item.sizeBytes,
+            isLiked: false,
+            takenAt: item.takenAt,
+            createdAt: item.createdAt,
+            status: item.status,
+            progress: item.progress,
+            error: item.error,
+            attempts: item.attempts,
+            contentHash: item.contentHash,
+        }));
+    }, [pendingItems]);
+
+    const viewerContextIds = useMemo(() => {
+        return [...photos]
+            .sort((a, b) => {
+                const dateA = new Date(a.takenAt || a.createdAt).getTime();
+                const dateB = new Date(b.takenAt || b.createdAt).getTime();
+                return dateB - dateA;
+            })
+            .map((photo) => photo.id);
+    }, [photos]);
+
+    const filteredGalleryPhotos = useMemo<GalleryPhoto[]>(() => {
+        if (filter === "favorites") {
+            return serverPhotos.filter((photo) => photo.isLiked);
+        }
+        return [...localPendingPhotos, ...serverPhotos];
+    }, [filter, localPendingPhotos, serverPhotos]);
+
+    const sortedPhotos = useMemo<GalleryPhoto[]>(() => {
+        return [...filteredGalleryPhotos].sort((a, b) => {
             const dateA = new Date(a.takenAt || a.createdAt).getTime();
             const dateB = new Date(b.takenAt || b.createdAt).getTime();
             return dateB - dateA;
         });
-    }, [filteredPhotos]);
+    }, [filteredGalleryPhotos]);
 
     const groupedPhotos = useMemo(() => {
-        const groups: { title: string; photos: Photo[] }[] = [];
+        const groups: { title: string; photos: GalleryPhoto[] }[] = [];
         sortedPhotos.forEach((photo) => {
             const date = new Date(photo.takenAt || photo.createdAt);
             const title = formatDateHeader(date);
@@ -295,6 +407,15 @@ export default function HomePage() {
         if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
         const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined };
         return date.toLocaleDateString(undefined, options);
+    }
+
+    function getLocalStatusLabel(photo: LocalGalleryPhoto) {
+        if (photo.status === "pending_hash") return "Preparing";
+        if (photo.status === "queued_upload") return "Queued";
+        if (photo.status === "uploading") return `Uploading ${photo.progress}%`;
+        if (photo.status === "uploaded") return "Syncing...";
+        if (photo.status === "failed") return "Failed • Tap to retry";
+        return "Pending";
     }
 
     return (
@@ -323,63 +444,188 @@ export default function HomePage() {
                 <div style={{ padding: "1rem", background: "var(--error-soft)", borderRadius: "var(--r-md)", color: "var(--error)", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", border: "1px solid var(--error)" }}>{error}</div>
             )}
 
-            {!loading && !error && filteredPhotos.length === 0 && (
+            {!loading && !error && filteredGalleryPhotos.length === 0 && (
                 <div className="empty-state" style={{ minHeight: "50vh" }}>
                     <p className="empty-state-title" style={{ fontSize: '1.25rem' }}>{filter === "favorites" ? "No favorites yet" : "No photos yet"}</p>
                     <button className="btn btn-primary" onClick={() => router.push("/upload")} style={{ marginTop: "1.5rem" }}>Upload Photos</button>
                 </div>
             )}
 
-            {groupedPhotos.map((group) => (
-                <div key={group.title} style={{ marginBottom: "3rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", padding: "0 4px" }}>
-                        <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--ink-2)" }}>{group.title}</h2>
-                        {selectMode && (
-                            <button
-                                onClick={() => toggleGroupSelection(group.photos.map(p => p.id))}
-                                style={{
-                                    background: group.photos.every(p => selected.has(p.id)) ? "var(--accent)" : "var(--bg-elevated)",
-                                    border: `2px solid ${group.photos.every(p => selected.has(p.id)) ? "var(--bg-elevated)" : "var(--accent)"}`,
-                                    cursor: "pointer", color: "var(--bg-elevated)",
-                                    display: "flex", alignItems: "center", justifyContent: "center",
-                                    width: 28, height: 28, borderRadius: "50%", transition: "all 150ms ease",
-                                    boxShadow: "0 2px 6px rgba(0,0,0,0.1)"
-                                }}
-                            >
-                                {group.photos.every(p => selected.has(p.id)) && <Check size={18} strokeWidth={3.5} />}
-                            </button>
-                        )}
-                    </div>
-                    <div className="responsive-grid">
-                        {group.photos.map((photo) => {
-                            const isSelected = selected.has(photo.id);
-                            return (
-                                <div key={photo.id} className="press-scale" style={{
-                                    position: "relative", aspectRatio: "1",
-                                    background: "var(--bg-subtle)", cursor: "pointer",
-                                    borderRadius: "var(--r-sm)", overflow: "hidden"
-                                }}
-                                    onClick={() => {
-                                        if (selectMode) {
-                                            toggleSelect(photo.id);
-                                        } else {
-                                            // Save context for navigation
-                                            sessionStorage.setItem("current_gallery_context", JSON.stringify(sortedPhotos.map(p => p.id)));
-                                            router.push(`/photo/${photo.id}`);
-                                        }
+            {groupedPhotos.map((group) => {
+                const selectableServerIds = group.photos
+                    .filter((photo): photo is ServerGalleryPhoto => photo.kind === "server")
+                    .map((photo) => photo.id);
+                const allSelectableSelected =
+                    selectableServerIds.length > 0 &&
+                    selectableServerIds.every((id) => selected.has(id));
+
+                return (
+                    <div key={group.title} style={{ marginBottom: "3rem" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", padding: "0 4px" }}>
+                            <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--ink-2)" }}>{group.title}</h2>
+                            {selectMode && selectableServerIds.length > 0 && (
+                                <button
+                                    onClick={() => toggleGroupSelection(selectableServerIds)}
+                                    style={{
+                                        background: allSelectableSelected ? "var(--accent)" : "var(--bg-elevated)",
+                                        border: `2px solid ${allSelectableSelected ? "var(--bg-elevated)" : "var(--accent)"}`,
+                                        cursor: "pointer", color: "var(--bg-elevated)",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        width: 28, height: 28, borderRadius: "50%", transition: "all 150ms ease",
+                                        boxShadow: "0 2px 6px rgba(0,0,0,0.1)"
                                     }}
                                 >
-                                    <CachedImage
-                                        id={photo.id}
-                                        src={photo.thumbUrl || photo.url}
-                                        alt=""
-                                        className="w-full h-full object-cover block transition-opacity duration-150"
-                                        style={{ width: "100%", height: "100%", objectFit: "cover", opacity: selectMode ? (isSelected ? 1 : 0.4) : 1 }}
-                                        category="thumb"
-                                    />
-                                    {photo.isLiked && !selectMode && <Heart size={16} fill="var(--accent)" color="var(--accent)" style={{ position: "absolute", bottom: 8, right: 8 }} />}
-                                    {
-                                        selectMode && (
+                                    {allSelectableSelected && <Check size={18} strokeWidth={3.5} />}
+                                </button>
+                            )}
+                        </div>
+                        <div className="responsive-grid">
+                            {group.photos.map((photo) => {
+                                const isLocal = photo.kind === "local";
+                                const isSelected = !isLocal && selected.has(photo.id);
+
+                                return (
+                                    <div
+                                        key={photo.id}
+                                        className="press-scale"
+                                        style={{
+                                            position: "relative",
+                                            aspectRatio: "1",
+                                            background: "var(--bg-subtle)",
+                                            cursor: isLocal ? (photo.status === "failed" ? "pointer" : "default") : "pointer",
+                                            borderRadius: "var(--r-sm)",
+                                            overflow: "hidden",
+                                            opacity: selectMode && !isLocal ? (isSelected ? 1 : 0.4) : 1,
+                                            WebkitUserSelect: "none",
+                                            userSelect: "none",
+                                        }}
+                                        onTouchStart={() => {
+                                            if (!isLocal) startLongPress(photo.id);
+                                        }}
+                                        onTouchEnd={cancelLongPress}
+                                        onTouchMove={cancelLongPress}
+                                        onMouseDown={() => {
+                                            if (!isLocal) startLongPress(photo.id);
+                                        }}
+                                        onMouseUp={cancelLongPress}
+                                        onMouseLeave={cancelLongPress}
+                                        onContextMenu={(e) => {
+                                            // Prevent native context menu on long-press
+                                            if (!isLocal) e.preventDefault();
+                                        }}
+                                        onClick={() => {
+                                            // Guard: if a long-press just fired, don't navigate
+                                            if (longPressTriggered.current) {
+                                                longPressTriggered.current = false;
+                                                return;
+                                            }
+
+                                            if (isLocal) {
+                                                if (photo.status === "failed") {
+                                                    void retry(photo.localId);
+                                                }
+                                                return;
+                                            }
+
+                                            if (selectMode) {
+                                                toggleSelect(photo.id);
+                                                return;
+                                            }
+
+                                            sessionStorage.setItem("current_gallery_context", JSON.stringify(viewerContextIds));
+                                            router.push(`/photo/${photo.id}`);
+                                        }}
+                                    >
+                                        {isLocal ? (
+                                            <img
+                                                src={photo.thumbUrl || photo.url}
+                                                alt=""
+                                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                            />
+                                        ) : (
+                                            <CachedImage
+                                                id={photo.id}
+                                                src={photo.thumbUrl || photo.url}
+                                                alt=""
+                                                className="w-full h-full object-cover block transition-opacity duration-150"
+                                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                                category="thumb"
+                                            />
+                                        )}
+
+                                        {!isLocal && photo.isLiked && !selectMode && (
+                                            <Heart
+                                                size={16}
+                                                fill="var(--accent)"
+                                                color="var(--accent)"
+                                                style={{ position: "absolute", bottom: 8, right: 8 }}
+                                            />
+                                        )}
+
+                                        {isLocal && (
+                                            <>
+                                                <div style={{
+                                                    position: "absolute",
+                                                    inset: 0,
+                                                    background: "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0.08) 55%)",
+                                                }} />
+                                                <div style={{
+                                                    position: "absolute",
+                                                    left: 8,
+                                                    right: 8,
+                                                    bottom: 8,
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    gap: "0.28rem",
+                                                }}>
+                                                    <span style={{
+                                                        fontSize: "0.68rem",
+                                                        fontWeight: 700,
+                                                        color: "#fff",
+                                                        textShadow: "0 1px 2px rgba(0,0,0,0.55)",
+                                                    }}>
+                                                        {getLocalStatusLabel(photo)}
+                                                    </span>
+                                                    {(photo.status === "uploading" || photo.status === "queued_upload" || photo.status === "pending_hash") && (
+                                                        <div style={{ width: "100%", height: 4, borderRadius: 999, overflow: "hidden", background: "rgba(255,255,255,0.24)" }}>
+                                                            <div style={{
+                                                                width: `${Math.max(5, photo.progress)}%`,
+                                                                height: "100%",
+                                                                background: "#fff",
+                                                                transition: "width 150ms ease",
+                                                            }} />
+                                                        </div>
+                                                    )}
+                                                    {photo.status === "failed" && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                void remove(photo.localId);
+                                                            }}
+                                                            style={{
+                                                                marginTop: "0.1rem",
+                                                                border: "none",
+                                                                background: "rgba(0,0,0,0.42)",
+                                                                color: "#fff",
+                                                                fontSize: "0.65rem",
+                                                                borderRadius: 999,
+                                                                padding: "0.2rem 0.45rem",
+                                                                alignSelf: "flex-start",
+                                                                display: "inline-flex",
+                                                                alignItems: "center",
+                                                                gap: "0.2rem",
+                                                            }}
+                                                        >
+                                                            <AlertTriangle size={10} />
+                                                            Remove
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {selectMode && !isLocal && (
                                             <div style={{
                                                 position: "absolute", top: 8, right: 8, width: 24, height: 24, borderRadius: "50%",
                                                 background: isSelected ? "var(--accent)" : "var(--bg-elevated)",
@@ -389,14 +635,14 @@ export default function HomePage() {
                                             }}>
                                                 {isSelected && <Check size={16} color="var(--bg-elevated)" strokeWidth={4} />}
                                             </div>
-                                        )
-                                    }
-                                </div >
-                            );
-                        })}
-                    </div >
-                </div >
-            ))}
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                );
+            })}
 
             <div ref={observerRef} style={{ height: 100 }} />
             {loadingMore && <div style={{ textAlign: "center", padding: "1rem" }}><Loader size={20} className="spin" color="var(--accent)" /></div>}
@@ -411,7 +657,15 @@ export default function HomePage() {
                         background: "var(--bg-elevated)", border: "1px solid var(--line)",
                         boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
                     }}>
-                        <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <button
+                                onClick={() => setSelected(new Set())}
+                                style={{ border: "none", background: "none", color: "var(--muted)", padding: 0, display: "flex", cursor: "pointer" }}
+                            >
+                                <X size={20} />
+                            </button>
+                            <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</span>
+                        </div>
                         <div style={{ display: "flex", gap: "0.5rem" }}>
                             <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
                                 <FolderPlus size={14} /> Album

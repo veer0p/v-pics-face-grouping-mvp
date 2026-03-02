@@ -19,15 +19,20 @@ export type FileMetadata = {
  * Calculate a unique fingerprint of a file for de-duplication.
  * For large files (>50MB), we use a "Quick Fingerprint" (Size + First 1MB + Last 1MB) 
  * to prevent browser memory exhaustion and crashes.
+ * Falls back to filename-based fingerprint when crypto.subtle is unavailable.
  */
 export async function calculateHash(file: File): Promise<string | null> {
     const SIZE_LIMIT = 50 * 1024 * 1024; // 50MB
     const CHUNK_SIZE = 1 * 1024 * 1024; // 1MB
 
+    // Fallback fingerprint for when crypto API is unavailable
+    const fallbackFingerprint = () =>
+        `fb_${file.name}_${file.size}_${file.lastModified}`;
+
     try {
         if (!window.crypto?.subtle) {
-            console.warn("[HASH] crypto.subtle is unavailable (insecure context?). Skipping hash.");
-            return null;
+            console.warn("[HASH] crypto.subtle is unavailable (insecure context?). Using fallback fingerprint.");
+            return fallbackFingerprint();
         }
 
         if (file.size <= SIZE_LIMIT) {
@@ -57,8 +62,8 @@ export async function calculateHash(file: File): Promise<string | null> {
             return `q_${file.size}_${toHex(firstHash).substring(0, 16)}_${toHex(lastHash).substring(0, 16)}`;
         }
     } catch (err) {
-        console.error("[HASH] Error calculating hash:", err);
-        return null;
+        console.error("[HASH] Error calculating hash, using fallback:", err);
+        return fallbackFingerprint();
     }
 }
 

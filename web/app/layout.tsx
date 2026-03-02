@@ -4,6 +4,7 @@ import "./globals.css";
 import { AppShell } from "@/components/AppShell";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/components/AuthContext";
+import { UploadQueueProvider } from "@/components/UploadQueueProvider";
 
 const dmSans = DM_Sans({
     variable: "--font-dm-sans",
@@ -50,11 +51,12 @@ export default function RootLayout({
                 style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}>
                 <AuthProvider>
                     <ThemeProvider>
-                        <AppShell>{children}</AppShell>
+                        <UploadQueueProvider>
+                            <AppShell>{children}</AppShell>
+                        </UploadQueueProvider>
                     </ThemeProvider>
                 </AuthProvider>
             </body>
         </html>
     );
 }
-

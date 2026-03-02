@@ -1,0 +1,651 @@
+"use client";
+
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@/components/AuthContext";
+import { UploadQueueStore, type UploadQueueItem } from "@/lib/upload-queue";
+import { calculateHash, extractBrowserExif, generateThumbnail, uploadToB2 } from "@/lib/upload-utils";
+import { PhotoMetadataCache } from "@/lib/photo-cache";
+
+const MAX_HASHES_PER_REQUEST = 500;
+const QUEUE_MAX_ITEMS = 3000;
+const META_CONCURRENCY = 3;
+const UPLOAD_BASE_CONCURRENCY = 4;
+const RETRY_BACKOFF_MS = [5000, 15000, 30000, 60000, 120000] as const;
+const SCHEDULER_INTERVAL_MS = 1500;
+
+type ServerPhotoMarker = {
+    id: string;
+    contentHash?: string | null;
+};
+
+export type PendingUploadItem = {
+    localId: string;
+    previewUrl: string;
+    filename: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: string;
+    takenAt: string | null;
+    contentHash: string | null;
+    status: UploadQueueItem["status"];
+    progress: number;
+    error: string | null;
+    attempts: number;
+    serverPhotoId: string | null;
+};
+
+type UploadQueueContextType = {
+    isEnabled: boolean;
+    loading: boolean;
+    pendingItems: PendingUploadItem[];
+    enqueueFiles: (files: File[]) => Promise<{ queued: number; duplicates: number }>;
+    retry: (localId: string) => Promise<void>;
+    remove: (localId: string) => Promise<void>;
+    reconcileWithServerPhotos: (photos: ServerPhotoMarker[]) => Promise<void>;
+};
+
+const UploadQueueContext = createContext<UploadQueueContextType>({
+    isEnabled: true,
+    loading: true,
+    pendingItems: [],
+    enqueueFiles: async () => ({ queued: 0, duplicates: 0 }),
+    retry: async () => { },
+    remove: async () => { },
+    reconcileWithServerPhotos: async () => { },
+});
+
+function makeLocalId() {
+    return `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getUploadConcurrency() {
+    if (typeof navigator === "undefined") return UPLOAD_BASE_CONCURRENCY;
+    const cpu = navigator.hardwareConcurrency || UPLOAD_BASE_CONCURRENCY;
+    return Math.min(8, Math.max(3, Math.floor(cpu / 2)));
+}
+
+function getRetryDelay(attempts: number) {
+    const index = Math.max(0, Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1));
+    return RETRY_BACKOFF_MS[index];
+}
+
+async function withConcurrency<T>(
+    items: T[],
+    limit: number,
+    worker: (item: T) => Promise<void>,
+) {
+    let cursor = 0;
+    const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (true) {
+            const idx = cursor++;
+            if (idx >= items.length) return;
+            await worker(items[idx]);
+        }
+    });
+    await Promise.all(runners);
+}
+
+async function checkDuplicateHashes(hashes: string[]): Promise<Set<string>> {
+    if (hashes.length === 0) return new Set<string>();
+    const existing = new Set<string>();
+
+    for (let index = 0; index < hashes.length; index += MAX_HASHES_PER_REQUEST) {
+        const chunk = hashes.slice(index, index + MAX_HASHES_PER_REQUEST);
+        const response = await fetch("/api/upload/check-duplicates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hashes: chunk }),
+        });
+        if (!response.ok) continue;
+        const data = await response.json();
+        for (const hash of data?.existingHashes || []) {
+            if (typeof hash === "string") existing.add(hash);
+        }
+    }
+
+    return existing;
+}
+
+export function UploadQueueProvider({ children }: { children: React.ReactNode }) {
+    const { user, loading: authLoading } = useAuth();
+    const [queueItems, setQueueItems] = useState<UploadQueueItem[]>([]);
+    const [queueLoaded, setQueueLoaded] = useState(false);
+    const inFlightRef = useRef<Set<string>>(new Set());
+    const queueRef = useRef<UploadQueueItem[]>([]);
+    const schedulerRef = useRef<number | null>(null);
+    const previewUrlsRef = useRef<Map<string, string>>(new Map());
+    const enqueueGenRef = useRef(0);
+
+    const isEnabled = process.env.NEXT_PUBLIC_ENABLE_LOCAL_UPLOAD_QUEUE !== "false";
+
+    useEffect(() => {
+        queueRef.current = queueItems;
+    }, [queueItems]);
+
+    const revokePreview = useCallback((localId: string) => {
+        const url = previewUrlsRef.current.get(localId);
+        if (!url) return;
+        URL.revokeObjectURL(url);
+        previewUrlsRef.current.delete(localId);
+    }, []);
+
+    const getPreviewUrl = useCallback((localId: string, blob: Blob) => {
+        const existing = previewUrlsRef.current.get(localId);
+        if (existing) return existing;
+        const created = URL.createObjectURL(blob);
+        previewUrlsRef.current.set(localId, created);
+        return created;
+    }, []);
+
+    const patchQueueItem = useCallback(async (
+        localId: string,
+        patch: Partial<UploadQueueItem>,
+        persist = true,
+    ): Promise<UploadQueueItem | null> => {
+        let updated: UploadQueueItem | null = null;
+        setQueueItems((prev) => prev.map((item) => {
+            if (item.local_id !== localId) return item;
+            updated = { ...item, ...patch };
+            return updated;
+        }));
+
+        if (persist && updated) {
+            try {
+                await UploadQueueStore.putItem(updated);
+            } catch (err) {
+                console.error("[UPLOAD-QUEUE] failed to persist patch:", err);
+            }
+        }
+
+        return updated;
+    }, []);
+
+    const removeQueueItem = useCallback(async (localId: string) => {
+        inFlightRef.current.delete(localId);
+        revokePreview(localId);
+        setQueueItems((prev) => prev.filter((item) => item.local_id !== localId));
+        try {
+            await UploadQueueStore.deleteItem(localId);
+        } catch (err) {
+            console.error("[UPLOAD-QUEUE] failed to delete item:", err);
+        }
+    }, [revokePreview]);
+
+    const uploadOne = useCallback(async (item: UploadQueueItem) => {
+        const startAttemptAt = new Date().toISOString();
+        await patchQueueItem(item.local_id, {
+            status: "uploading",
+            progress: Math.max(item.progress, 5),
+            error: null,
+            last_attempt_at: startAttemptAt,
+        });
+
+        let currentItem = queueRef.current.find((entry) => entry.local_id === item.local_id) || item;
+
+        try {
+            if (!currentItem.content_hash) {
+                const [hash, exif] = await Promise.all([
+                    calculateHash(currentItem.file_blob as File).catch(() => null),
+                    extractBrowserExif(currentItem.file_blob as File).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 })),
+                ]);
+                const patched = await patchQueueItem(currentItem.local_id, {
+                    content_hash: hash,
+                    taken_at: exif.takenAt,
+                    width: exif.width || null,
+                    height: exif.height || null,
+                    metadata: exif.metadata || {},
+                });
+                if (patched) currentItem = patched;
+            }
+
+            if (currentItem.content_hash) {
+                const duplicates = await checkDuplicateHashes([currentItem.content_hash]);
+                if (duplicates.has(currentItem.content_hash)) {
+                    console.info("[UPLOAD-QUEUE] duplicate detected before upload:", currentItem.original_name);
+                    await removeQueueItem(currentItem.local_id);
+                    return;
+                }
+            }
+
+            const presignRes = await fetch(
+                `/api/upload/presign?filename=${encodeURIComponent(currentItem.original_name)}&type=${currentItem.mime_type || "application/octet-stream"}`,
+            );
+            if (!presignRes.ok) {
+                throw new Error(`Presign failed (${presignRes.status})`);
+            }
+            const presigned = await presignRes.json();
+            const originalKey = presigned.originalKey as string;
+            const thumbKey = presigned.thumbKey as string;
+            const uploadUrl = presigned.uploadUrl as string;
+            const thumbUploadUrl = presigned.thumbUploadUrl as string;
+            const fileId = presigned.fileId as string;
+
+            await patchQueueItem(currentItem.local_id, { progress: 20 }, false);
+
+            const uploadPromise = uploadToB2(currentItem.file_blob as File, uploadUrl, (pct) => {
+                void patchQueueItem(currentItem.local_id, { progress: 20 + Math.round(pct * 0.5) }, false);
+            });
+
+            const thumbPromise = (async () => {
+                try {
+                    const thumbBlob = await generateThumbnail(currentItem.file_blob as File);
+                    const thumbFile = new File([thumbBlob], `thumb_${currentItem.original_name}`, { type: "image/webp" });
+                    await uploadToB2(thumbFile, thumbUploadUrl, () => { });
+                } catch (err) {
+                    console.warn("[UPLOAD-QUEUE] thumbnail generation/upload failed:", err);
+                }
+            })();
+
+            await Promise.all([uploadPromise, thumbPromise]).catch(async (err) => {
+                await fetch("/api/upload/cleanup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ originalKey: originalKey || null, thumbKey: thumbKey || null }),
+                }).catch(() => { });
+                throw err;
+            });
+
+            await patchQueueItem(currentItem.local_id, { progress: 85 }, false);
+
+            const completeRes = await fetch("/api/upload/complete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: fileId,
+                    original_key: originalKey,
+                    original_name: currentItem.original_name,
+                    thumb_key: thumbKey,
+                    mime_type: currentItem.mime_type,
+                    size_bytes: currentItem.size_bytes,
+                    width: currentItem.width,
+                    height: currentItem.height,
+                    taken_at: currentItem.taken_at,
+                    content_hash: currentItem.content_hash,
+                    metadata: currentItem.metadata,
+                }),
+            });
+
+            const completeData = await completeRes.json();
+
+            if (!completeRes.ok) {
+                if (completeRes.status === 409 || String(completeData?.error || "").toLowerCase().includes("duplicate")) {
+                    await removeQueueItem(currentItem.local_id);
+                    return;
+                }
+                throw new Error(completeData?.error || `Upload completion failed (${completeRes.status})`);
+            }
+
+            await patchQueueItem(currentItem.local_id, {
+                status: "uploaded",
+                progress: 100,
+                error: null,
+                attempts: 0,
+                server_photo_id: completeData?.photo?.id || null,
+            });
+            await PhotoMetadataCache.clear();
+            await PhotoMetadataCache.setHash("");
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const latest = queueRef.current.find((entry) => entry.local_id === item.local_id);
+            if (!latest) return;
+            const nextAttempts = (latest.attempts || 0) + 1;
+            await patchQueueItem(item.local_id, {
+                status: "failed",
+                progress: 0,
+                error: message,
+                attempts: nextAttempts,
+                last_attempt_at: new Date().toISOString(),
+            });
+            console.warn("[UPLOAD-QUEUE] upload failed:", item.original_name, message);
+        }
+    }, [patchQueueItem, removeQueueItem]);
+
+    const launchWorkers = useCallback(async () => {
+        if (authLoading || !user || !queueLoaded) return;
+
+        const concurrency = getUploadConcurrency();
+        if (inFlightRef.current.size >= concurrency) return;
+
+        const now = Date.now();
+        const queue = queueRef.current;
+
+        const candidates = queue
+            .filter((item) => {
+                if (inFlightRef.current.has(item.local_id)) return false;
+                if (item.status === "queued_upload") return true;
+                if (item.status !== "failed") return false;
+                if (item.attempts >= 5) return false;
+                if (!item.last_attempt_at) return true;
+                const delay = getRetryDelay(item.attempts);
+                return now - new Date(item.last_attempt_at).getTime() >= delay;
+            })
+            .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+        for (const candidate of candidates) {
+            if (inFlightRef.current.size >= concurrency) break;
+            inFlightRef.current.add(candidate.local_id);
+            void uploadOne(candidate).finally(() => {
+                inFlightRef.current.delete(candidate.local_id);
+                void launchWorkers();
+            });
+        }
+    }, [authLoading, queueLoaded, uploadOne, user]);
+
+    const processNewItems = useCallback(async (createdItems: UploadQueueItem[]) => {
+        if (createdItems.length === 0) return { queued: 0, duplicates: 0 };
+
+        const preparedHashes = new Map<string, string | null>();
+
+        await withConcurrency(createdItems, META_CONCURRENCY, async (item) => {
+            const [hash, exif] = await Promise.all([
+                calculateHash(item.file_blob as File).catch(() => null),
+                extractBrowserExif(item.file_blob as File).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 })),
+            ]);
+
+            preparedHashes.set(item.local_id, hash);
+            await patchQueueItem(item.local_id, {
+                content_hash: hash,
+                taken_at: exif.takenAt,
+                width: exif.width || null,
+                height: exif.height || null,
+                metadata: exif.metadata || {},
+            });
+        });
+
+        const readyHashes = Array.from(
+            new Set(
+                Array.from(preparedHashes.values()).filter((hash): hash is string => !!hash),
+            ),
+        );
+        const existingHashes = await checkDuplicateHashes(readyHashes);
+        const createdIds = new Set(createdItems.map((item) => item.local_id));
+        const queueHashes = new Set(
+            queueRef.current
+                .filter((item) => !createdIds.has(item.local_id))
+                .map((item) => item.content_hash)
+                .filter((hash): hash is string => typeof hash === "string" && hash.length > 0),
+        );
+        const seenInBatch = new Set<string>();
+
+        let duplicates = 0;
+        let queued = 0;
+        for (const item of createdItems) {
+            const localId = item.local_id;
+            const hash = preparedHashes.get(localId) ?? null;
+
+            if (hash && (existingHashes.has(hash) || queueHashes.has(hash) || seenInBatch.has(hash))) {
+                duplicates += 1;
+                await removeQueueItem(localId);
+                continue;
+            }
+            if (hash) {
+                seenInBatch.add(hash);
+            }
+
+            queued += 1;
+            await patchQueueItem(localId, {
+                status: "queued_upload",
+                progress: 0,
+                error: null,
+            });
+        }
+
+        console.info("[UPLOAD-QUEUE] enqueue summary", { queued, duplicates, total: createdItems.length });
+        void launchWorkers();
+        return { queued, duplicates };
+    }, [launchWorkers, patchQueueItem, removeQueueItem]);
+
+    const enqueueFiles = useCallback(async (files: File[]) => {
+        if (!user) return { queued: 0, duplicates: 0 };
+        if (files.length === 0) return { queued: 0, duplicates: 0 };
+
+        const activeCount = queueRef.current.length;
+        const availableSlots = Math.max(QUEUE_MAX_ITEMS - activeCount, 0);
+        const accepted = files.slice(0, availableSlots);
+        const ignored = files.length - accepted.length;
+
+        if (ignored > 0) {
+            console.warn(`[UPLOAD-QUEUE] queue cap reached. Ignored ${ignored} file(s).`);
+        }
+
+        if (accepted.length === 0) return { queued: 0, duplicates: 0 };
+
+        // Deduplicate against existing queue items by filename + size
+        const existingSignatures = new Set(
+            queueRef.current.map((item) => `${item.original_name}|${item.size_bytes}`),
+        );
+        const seenInBatch = new Set<string>();
+        const deduped: File[] = [];
+        let preDedup = 0;
+
+        for (const file of accepted) {
+            const sig = `${file.name}|${file.size}`;
+            if (existingSignatures.has(sig) || seenInBatch.has(sig)) {
+                preDedup += 1;
+                continue;
+            }
+            seenInBatch.add(sig);
+            deduped.push(file);
+        }
+
+        if (preDedup > 0) {
+            console.info(`[UPLOAD-QUEUE] skipped ${preDedup} file(s) already in queue (name+size match).`);
+        }
+
+        if (deduped.length === 0) return { queued: 0, duplicates: preDedup };
+
+        const now = Date.now();
+        const created = deduped.map((file, index) => {
+            const ts = new Date(now + index).toISOString();
+            const item: UploadQueueItem = {
+                local_id: makeLocalId(),
+                user_id: user.id,
+                file_blob: file,
+                original_name: file.name,
+                mime_type: file.type || "application/octet-stream",
+                size_bytes: file.size,
+                created_at: ts,
+                taken_at: null,
+                width: null,
+                height: null,
+                content_hash: null,
+                metadata: {},
+                status: "pending_hash",
+                progress: 0,
+                error: null,
+                attempts: 0,
+                last_attempt_at: null,
+                server_photo_id: null,
+            };
+            return item;
+        });
+
+        setQueueItems((prev) => [...created, ...prev]);
+        await UploadQueueStore.putItems(created);
+
+        const generation = ++enqueueGenRef.current;
+        const summary = await processNewItems(created);
+        if (generation !== enqueueGenRef.current) {
+            return { queued: summary.queued, duplicates: summary.duplicates + preDedup };
+        }
+        return { queued: summary.queued, duplicates: summary.duplicates + preDedup };
+    }, [processNewItems, user]);
+
+    const retry = useCallback(async (localId: string) => {
+        const updated = await patchQueueItem(localId, {
+            status: "queued_upload",
+            error: null,
+            attempts: 0,
+            last_attempt_at: null,
+            progress: 0,
+        });
+        if (!updated) return;
+        void launchWorkers();
+    }, [launchWorkers, patchQueueItem]);
+
+    const remove = useCallback(async (localId: string) => {
+        await removeQueueItem(localId);
+    }, [removeQueueItem]);
+
+    const reconcileWithServerPhotos = useCallback(async (photos: ServerPhotoMarker[]) => {
+        if (photos.length === 0) return;
+
+        const idSet = new Set(photos.map((photo) => photo.id));
+        const hashSet = new Set(
+            photos
+                .map((photo) => photo.contentHash)
+                .filter((hash): hash is string => typeof hash === "string" && hash.length > 0),
+        );
+
+        const uploadedLocals = queueRef.current.filter((item) => item.status === "uploaded");
+        const matchedLocalIds: string[] = [];
+
+        for (const item of uploadedLocals) {
+            if (item.server_photo_id && idSet.has(item.server_photo_id)) {
+                matchedLocalIds.push(item.local_id);
+                continue;
+            }
+            if (item.content_hash && hashSet.has(item.content_hash)) {
+                matchedLocalIds.push(item.local_id);
+            }
+        }
+
+        if (matchedLocalIds.length === 0) return;
+
+        for (const localId of matchedLocalIds) {
+            revokePreview(localId);
+        }
+        setQueueItems((prev) => prev.filter((item) => !matchedLocalIds.includes(item.local_id)));
+        await UploadQueueStore.deleteItems(matchedLocalIds);
+    }, [revokePreview]);
+
+    useEffect(() => {
+        if (authLoading) return;
+        if (!user) {
+            setQueueItems([]);
+            setQueueLoaded(true);
+            return;
+        }
+
+        let cancelled = false;
+        setQueueLoaded(false);
+
+        const load = async () => {
+            try {
+                const items = await UploadQueueStore.getUserItems(user.id);
+                const resetItems = items
+                    .map((item) => {
+                        if (item.status === "failed") {
+                            return { ...item, attempts: 0, last_attempt_at: null };
+                        }
+                        if (item.status === "uploading" || item.status === "pending_hash") {
+                            return {
+                                ...item,
+                                status: "queued_upload" as const,
+                                progress: 0,
+                                error: null,
+                                last_attempt_at: null,
+                            };
+                        }
+                        return item;
+                    })
+                    .filter((item) => item.status !== "duplicate_skipped");
+                await UploadQueueStore.putItems(resetItems);
+                if (cancelled) return;
+                setQueueItems(resetItems);
+            } catch (err) {
+                console.error("[UPLOAD-QUEUE] failed loading queue:", err);
+            } finally {
+                if (!cancelled) setQueueLoaded(true);
+            }
+        };
+
+        void load();
+        return () => {
+            cancelled = true;
+        };
+    }, [authLoading, user]);
+
+    useEffect(() => {
+        if (authLoading || !user || !queueLoaded) return;
+
+        const tick = () => {
+            void launchWorkers();
+        };
+        tick();
+        schedulerRef.current = window.setInterval(tick, SCHEDULER_INTERVAL_MS);
+        return () => {
+            if (schedulerRef.current !== null) {
+                window.clearInterval(schedulerRef.current);
+                schedulerRef.current = null;
+            }
+        };
+    }, [authLoading, launchWorkers, queueLoaded, user]);
+
+    useEffect(() => {
+        const activeIds = new Set(queueItems.map((item) => item.local_id));
+        for (const [localId, url] of previewUrlsRef.current.entries()) {
+            if (!activeIds.has(localId)) {
+                URL.revokeObjectURL(url);
+                previewUrlsRef.current.delete(localId);
+            }
+        }
+    }, [queueItems]);
+
+    useEffect(() => {
+        const failedCount = queueItems.filter((item) => item.status === "failed").length;
+        if (failedCount > 20) {
+            console.warn("[UPLOAD-QUEUE] high failed queue count:", failedCount);
+        }
+    }, [queueItems]);
+
+    useEffect(() => {
+        return () => {
+            for (const url of previewUrlsRef.current.values()) {
+                URL.revokeObjectURL(url);
+            }
+            previewUrlsRef.current.clear();
+        };
+    }, []);
+
+    const pendingItems = useMemo(() => {
+        if (!isEnabled) return [];
+        return queueItems
+            .filter((item) => item.status !== "duplicate_skipped")
+            .map((item) => ({
+                localId: item.local_id,
+                previewUrl: getPreviewUrl(item.local_id, item.file_blob),
+                filename: item.original_name,
+                mimeType: item.mime_type,
+                sizeBytes: item.size_bytes,
+                createdAt: item.created_at,
+                takenAt: item.taken_at,
+                contentHash: item.content_hash,
+                status: item.status,
+                progress: item.progress,
+                error: item.error,
+                attempts: item.attempts,
+                serverPhotoId: item.server_photo_id,
+            }));
+    }, [getPreviewUrl, isEnabled, queueItems]);
+
+    const value = useMemo<UploadQueueContextType>(() => ({
+        isEnabled,
+        loading: authLoading || !queueLoaded,
+        pendingItems,
+        enqueueFiles,
+        retry,
+        remove,
+        reconcileWithServerPhotos,
+    }), [authLoading, enqueueFiles, isEnabled, pendingItems, queueLoaded, reconcileWithServerPhotos, remove, retry]);
+
+    return (
+        <UploadQueueContext.Provider value={value}>
+            {children}
+        </UploadQueueContext.Provider>
+    );
+}
+
+export function useUploadQueue() {
+    return useContext(UploadQueueContext);
+}
