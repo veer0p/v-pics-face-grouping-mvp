@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
+import { deleteObject } from "@/lib/r2";
+import { isAvatarObjectKey, resolveAvatarUrl } from "@/lib/avatar";
 
 const MAX_AVATAR_LENGTH = 1_500_000; // ~1.5MB text payload
 
@@ -15,6 +17,7 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
         }
         const updates: Record<string, string | null> = {};
+        const existingAvatar = user.avatar_url || null;
 
         if (typeof body.fullName === "string") {
             const fullName = body.fullName.trim();
@@ -29,11 +32,28 @@ export async function PATCH(req: NextRequest) {
                 return NextResponse.json({ error: "Invalid avatarUrl" }, { status: 400 });
             }
 
+            if (typeof body.avatarUrl === "string" && body.avatarUrl.startsWith("data:")) {
+                return NextResponse.json(
+                    { error: "Base64 avatars are no longer supported. Upload avatar to R2 first." },
+                    { status: 400 },
+                );
+            }
+
             if (typeof body.avatarUrl === "string" && body.avatarUrl.length > MAX_AVATAR_LENGTH) {
                 return NextResponse.json({ error: "Avatar image is too large" }, { status: 400 });
             }
 
             updates.avatar_url = body.avatarUrl || null;
+        }
+
+        if (body.avatarKey !== undefined) {
+            if (body.avatarKey !== null && typeof body.avatarKey !== "string") {
+                return NextResponse.json({ error: "Invalid avatarKey" }, { status: 400 });
+            }
+            if (typeof body.avatarKey === "string" && !isAvatarObjectKey(body.avatarKey)) {
+                return NextResponse.json({ error: "Invalid avatarKey format" }, { status: 400 });
+            }
+            updates.avatar_url = body.avatarKey || null;
         }
 
         if (Object.keys(updates).length === 0) {
@@ -55,7 +75,23 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });
         }
 
-        return NextResponse.json({ user: data });
+        const newAvatar = data.avatar_url || null;
+        if (
+            existingAvatar &&
+            existingAvatar !== newAvatar &&
+            isAvatarObjectKey(existingAvatar)
+        ) {
+            await deleteObject(existingAvatar).catch((cleanupError) => {
+                console.warn("[PROFILE] old avatar cleanup failed:", cleanupError);
+            });
+        }
+
+        return NextResponse.json({
+            user: {
+                ...data,
+                avatar_url: resolveAvatarUrl(data.avatar_url),
+            },
+        });
     } catch (err) {
         console.error("[PROFILE] update failed:", err);
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });

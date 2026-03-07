@@ -1,13 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
+/* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useState, use, useRef, useCallback } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-    ArrowLeft, Heart, Trash2, Download, Info, Loader, X,
-    Camera, Aperture, MapPin, ChevronLeft, ChevronRight,
-} from "lucide-react";
-import { ImageBlobCache, PhotoDetailCache } from "@/lib/photo-cache";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Loader, Maximize2, MessageCircle, Pause, Play, Send, Trash2, Volume2, VolumeX } from "lucide-react";
+import { ImageBlobCache, PhotoDetailCache, VideoBlobCache } from "@/lib/photo-cache";
+import { useAuth } from "@/components/AuthContext";
 
 type PhotoDetail = {
     id: string;
@@ -19,585 +18,836 @@ type PhotoDetail = {
     width: number | null;
     height: number | null;
     isLiked: boolean;
-    blurhash: string | null;
     takenAt: string | null;
-    cameraMake: string | null;
-    cameraModel: string | null;
-    lensModel: string | null;
-    focalLength: number | null;
-    aperture: number | null;
-    iso: number | null;
-    shutterSpeed: string | null;
-    gpsLat: number | null;
-    gpsLng: number | null;
     createdAt: string;
+    cameraModel?: string | null;
+    lensModel?: string | null;
+    shutterSpeed?: string | null;
+    aperture?: number | null;
+    iso?: number | null;
+    mediaType?: "image" | "video";
+    durationMs?: number | null;
 };
 
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+type CommentItem = {
+    id: string;
+    userId: string;
+    body: string;
+    createdAt: string;
+    user?: { username?: string; full_name?: string } | null;
+};
 
-function formatDate(iso: string): string {
-    return new Date(iso).toLocaleDateString("en-IN", {
-        weekday: "short", day: "numeric", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
-    });
-}
+const mt = (p: PhotoDetail) => (p.mediaType === "video" || p.mimeType?.startsWith("video/") ? "video" : "image");
+const fb = (b: number) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
+const fd = (i: string) => new Date(i).toLocaleString("en-IN");
+const fm = (ms?: number | null) => !ms ? "0:00" : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 
 export default function PhotoViewerPage({ params }: { params: Promise<{ id: string }> }) {
     const initialId = use(params).id;
     const router = useRouter();
-
-    // Core State
+    const { user } = useAuth();
     const [idList, setIdList] = useState<string[]>([]);
-    const [currentIndex, setCurrentIndex] = useState(-1);
+    const [idx, setIdx] = useState(0);
     const [photos, setPhotos] = useState<Record<string, PhotoDetail>>({});
-    const [idAtCenter, setIdAtCenter] = useState(initialId); // For URL sync
-    const isLocalPhoto = initialId.startsWith("local:");
-
+    const [panel, setPanel] = useState<"info" | "comments">("info");
+    const [panelOpen, setPanelOpen] = useState(false);
+    const [comments, setComments] = useState<Record<string, CommentItem[]>>({});
+    const [commentsLoading, setCommentsLoading] = useState(false);
+    const [draft, setDraft] = useState("");
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editingDraft, setEditingDraft] = useState("");
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(false);
-    const [showInfo, setShowInfo] = useState(false);
+    const [isZoomed, setIsZoomed] = useState(false);
+    const isLocal = initialId.startsWith("local:");
+    const currentId = idList[idx];
+    const photo = currentId ? photos[currentId] : null;
 
-    // Initialize ID List from context
     useEffect(() => {
-        // Handle local photo previews
-        if (isLocalPhoto) {
-            const stored = sessionStorage.getItem("local_photo_preview");
-            if (stored) {
-                try {
-                    const localData = JSON.parse(stored);
-                    setPhotos({
-                        [initialId]: {
-                            id: initialId,
-                            url: localData.url,
-                            thumbUrl: localData.url,
-                            filename: localData.filename || "Uploading...",
-                            mimeType: localData.mimeType || "image/jpeg",
-                            sizeBytes: localData.sizeBytes || 0,
-                            width: null,
-                            height: null,
-                            isLiked: false,
-                            blurhash: null,
-                            takenAt: null,
-                            cameraMake: null,
-                            cameraModel: null,
-                            lensModel: null,
-                            focalLength: null,
-                            aperture: null,
-                            iso: null,
-                            shutterSpeed: null,
-                            gpsLat: null,
-                            gpsLng: null,
-                            createdAt: localData.createdAt || new Date().toISOString(),
-                        },
-                    });
-                } catch (e) { console.error(e); }
+        if (isLocal) {
+            const s = sessionStorage.getItem("local_photo_preview");
+            if (s) {
+                const p = JSON.parse(s);
+                setPhotos({
+                    [initialId]: {
+                        id: initialId,
+                        url: p.url,
+                        thumbUrl: p.thumbUrl || p.url,
+                        filename: p.filename || "Uploading...",
+                        mimeType: p.mimeType || "image/jpeg",
+                        sizeBytes: p.sizeBytes || 0,
+                        width: null,
+                        height: null,
+                        isLiked: false,
+                        takenAt: null,
+                        createdAt: p.createdAt || new Date().toISOString(),
+                        mediaType: p.mediaType || (String(p.mimeType || "").startsWith("video/") ? "video" : "image"),
+                        durationMs: p.durationMs ?? null,
+                    },
+                });
             }
             setIdList([initialId]);
-            setCurrentIndex(0);
+            setIdx(0);
             setLoading(false);
             return;
         }
-
-        const stored = sessionStorage.getItem("current_gallery_context");
-        if (stored) {
+        const ctx = sessionStorage.getItem("current_gallery_context");
+        if (ctx) {
             try {
-                const list = JSON.parse(stored);
-                setIdList(list);
-                setCurrentIndex(list.indexOf(initialId));
-            } catch (e) { console.error(e); }
-        } else {
-            // Fallback for direct link
-            setIdList([initialId]);
-            setCurrentIndex(0);
+                const ids = JSON.parse(ctx) as string[];
+                setIdList(ids);
+                setIdx(Math.max(0, ids.indexOf(initialId)));
+                return;
+            } catch { }
         }
-    }, [initialId, isLocalPhoto]);
+        setIdList([initialId]);
+        setIdx(0);
+    }, [initialId, isLocal]);
 
-    // Preloading Logic
+    useEffect(() => {
+        // Default closed on mobile; open by default on desktop.
+        if (window.matchMedia("(min-width: 1024px)").matches) {
+            setPanelOpen(true);
+        }
+    }, []);
+
     const preload = useCallback(async (id: string) => {
-        if (!id || photos[id] || id.startsWith("local:")) return;
-        try {
-            const data = await PhotoDetailCache.fetchAndCache(id);
-            if (data) {
-                setPhotos(prev => ({ ...prev, [id]: data }));
-                // Preload the image blob too (quietly)
-                ImageBlobCache.fetchAndCache(id, data.url, 'full').catch(() => { });
-            }
-        } catch (err) {
-            console.warn("Preload failed for", id, err);
+        if (!id || id.startsWith("local:") || photos[id]) return;
+        const data = await PhotoDetailCache.fetchAndCache(id).catch(() => null);
+        if (data) {
+            setPhotos((prev) => ({ ...prev, [id]: data }));
+            if (mt(data) === "image") ImageBlobCache.fetchAndCache(id, data.url, "full").catch(() => { });
+            else VideoBlobCache.fetchAndCache(id, data.url).catch(() => { });
         }
     }, [photos]);
 
-    // Load current and adjacent
     useEffect(() => {
-        if (currentIndex === -1) return;
+        if (!idList.length) return;
+        const c = idList[idx];
+        const prev = idx > 0 ? idList[idx - 1] : null;
+        const next = idx < idList.length - 1 ? idList[idx + 1] : null;
+        setLoading(!photos[c]);
+        void preload(c);
+        if (prev) void preload(prev);
+        if (next) void preload(next);
+        window.history.replaceState(null, "", `/photo/${c}`);
+    }, [idList, idx, photos, preload]);
 
-        const currentId = idList[currentIndex];
-        const prevId = currentIndex > 0 ? idList[currentIndex - 1] : null;
-        const nextId = currentIndex < idList.length - 1 ? idList[currentIndex + 1] : null;
-
-        setLoading(!photos[currentId]);
-
-        preload(currentId);
-        if (prevId) preload(prevId);
-        if (nextId) preload(nextId);
-
-        // Sync URL (silently)
-        if (currentId !== idAtCenter) {
-            setIdAtCenter(currentId);
-            window.history.replaceState(null, "", `/photo/${currentId}`);
-        }
-    }, [currentIndex, idList, preload, photos, idAtCenter]);
-
-    const navigate = (dir: 'next' | 'prev') => {
-        if (dir === 'next' && currentIndex < idList.length - 1) {
-            setCurrentIndex(prev => prev + 1);
-        } else if (dir === 'prev' && currentIndex > 0) {
-            setCurrentIndex(prev => prev - 1);
-        }
-    };
-
-    // Keyboard support
     useEffect(() => {
-        const handleKeys = (e: KeyboardEvent) => {
-            if (e.key === "ArrowLeft") navigate('prev');
-            if (e.key === "ArrowRight") navigate('next');
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "ArrowLeft") setIdx((v) => Math.max(0, v - 1));
+            if (e.key === "ArrowRight") setIdx((v) => Math.min(idList.length - 1, v + 1));
             if (e.key === "Escape") router.back();
         };
-        window.addEventListener("keydown", handleKeys);
-        return () => window.removeEventListener("keydown", handleKeys);
-    }, [currentIndex, idList, router]);
-
-    const photo = photos[idList[currentIndex]];
-
-    const toggleLike = async () => {
-        if (!photo) return;
-        const nextLiked = !photo.isLiked;
-        const updatedPhoto = { ...photo, isLiked: nextLiked };
-
-        setPhotos(prev => ({ ...prev, [photo.id]: updatedPhoto }));
-        await PhotoDetailCache.set(photo.id, updatedPhoto);
-
-        await fetch("/api/photos/favorite", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: photo.id, liked: nextLiked }),
-        });
-    };
-
-    const handleDelete = async () => {
-        if (!photo) return;
-        const idToDelete = photo.id;
-
-        const newList = idList.filter(id => id !== idToDelete);
-        setIdList(newList);
-
-        if (newList.length === 0) {
-            router.back();
-        } else {
-            setCurrentIndex(Math.min(currentIndex, newList.length - 1));
-        }
-
-        await fetch("/api/photos/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ids: [idToDelete] }),
-        });
-    };
-
-    const handleDownload = async () => {
-        if (!photo) return;
-        try {
-            const response = await fetch(photo.url);
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = blobUrl;
-            a.download = photo.filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(blobUrl);
-        } catch {
-            window.open(photo.url, "_blank");
-        }
-    };
-
-    if (error) {
-        return (
-            <div style={{
-                position: "fixed", inset: 0, zIndex: 100, background: "var(--bg)",
-                display: "flex", flexDirection: "column", alignItems: "center",
-                justifyContent: "center", gap: "1rem", color: "var(--ink)",
-            }}>
-                <p style={{ fontWeight: 600 }}>Photo not found</p>
-                <button onClick={() => router.back()} style={{
-                    background: "var(--bg-subtle)", border: "1px solid var(--line)", color: "var(--ink)",
-                    padding: "0.6rem 1.5rem", borderRadius: "var(--r-md)", cursor: "pointer",
-                    fontWeight: 600,
-                }}>Go Back</button>
-            </div>
-        );
-    }
-
-    const btnStyle: React.CSSProperties = {
-        background: "none", border: "none", cursor: "pointer",
-        padding: "0.5rem", minHeight: "unset", borderRadius: "50%",
-        WebkitTapHighlightColor: "transparent",
-    };
-
-    const cameraInfo = photo ? [photo.cameraModel, photo.lensModel].filter(Boolean).join(" • ") : "";
-    const shootingInfo = photo ? [
-        photo.focalLength ? `${photo.focalLength}mm` : null,
-        photo.aperture ? `ƒ/${photo.aperture}` : null,
-        photo.shutterSpeed ? photo.shutterSpeed : null,
-        photo.iso ? `ISO ${photo.iso}` : null,
-    ].filter(Boolean).join("  ·  ") : "";
-
-    return (
-        <>
-            <div style={{
-                position: "fixed", inset: 0, zIndex: 100,
-                background: "#000", display: "flex", flexDirection: "column",
-            }}>
-                <div className="photo-viewer-container">
-                    <div className="photo-viewer-main" style={{ position: "relative", overflow: "hidden" }}>
-                        {/* Header */}
-                        <div style={{
-                            display: "flex", alignItems: "center", justifyContent: "space-between",
-                            padding: "0.85rem 1rem",
-                            paddingTop: "calc(0.85rem + env(safe-area-inset-top))",
-                            background: "linear-gradient(to bottom, rgba(0,0,0,0.7), transparent)",
-                            position: "absolute", top: 0, left: 0, right: 0, zIndex: 50,
-                        }}>
-                            <button onClick={() => router.back()} style={{ ...btnStyle, color: "#fff" }}>
-                                <ArrowLeft size={24} />
-                            </button>
-                            <div style={{ display: "flex", gap: "0.5rem" }}>
-                                {!isLocalPhoto && (
-                                    <>
-                                        <button onClick={toggleLike} style={btnStyle}>
-                                            <Heart size={22} color={photo?.isLiked ? "#ff4d6a" : "#fff"}
-                                                fill={photo?.isLiked ? "#ff4d6a" : "none"} strokeWidth={2} />
-                                        </button>
-                                        <button onClick={() => setShowInfo(!showInfo)} style={{ ...btnStyle, color: showInfo ? "#60a5fa" : "#fff" }}>
-                                            <Info size={22} />
-                                        </button>
-                                        <button onClick={handleDownload} style={{ ...btnStyle, color: "#fff" }}>
-                                            <Download size={22} />
-                                        </button>
-                                        <button onClick={handleDelete} style={{ ...btnStyle, color: "#f87171" }}>
-                                            <Trash2 size={22} />
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Photo Slider */}
-                        <PhotoSlider
-                            idList={idList}
-                            currentIndex={currentIndex}
-                            photos={photos}
-                            onNavigate={setCurrentIndex}
-                        />
-
-                        {/* Desktop Side Arrows */}
-                        <div className="desktop-only">
-                            {currentIndex > 0 && (
-                                <button onClick={() => navigate('prev')} className="nav-arrow-btn" style={{ left: "1.5rem" }}>
-                                    <ChevronLeft size={36} />
-                                </button>
-                            )}
-                            {currentIndex < idList.length - 1 && (
-                                <button onClick={() => navigate('next')} className="nav-arrow-btn" style={{ right: "1.5rem" }}>
-                                    <ChevronRight size={36} />
-                                </button>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Desktop Details Aside */}
-                    {showInfo && photo && (
-                        <aside className="photo-viewer-aside desktop-only">
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-                                <h2 style={{ fontSize: "1.25rem", fontWeight: 700, color: "var(--ink)" }}>Details</h2>
-                            </div>
-                            {photo.takenAt && (
-                                <div style={{ marginBottom: "2rem" }}>
-                                    <p style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--ink)" }}>{formatDate(photo.takenAt)}</p>
-                                    <p style={{ fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.25rem" }}>Original capture time</p>
-                                </div>
-                            )}
-                            {(cameraInfo || shootingInfo) && (
-                                <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--r-md)", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem" }}>
-                                        <Camera size={20} color="var(--accent)" />
-                                        <span style={{ fontSize: "1rem", fontWeight: 700 }}>{cameraInfo || "Camera"}</span>
-                                    </div>
-                                    {shootingInfo && (
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                            <Aperture size={18} color="var(--muted)" />
-                                            <span style={{ fontSize: "0.9rem", color: "var(--ink-2)", fontFamily: "monospace" }}>{shootingInfo}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            {photo.gpsLat && photo.gpsLng && (
-                                <div style={{ background: "var(--bg-subtle)", borderRadius: "var(--r-md)", padding: "1.25rem", marginBottom: "1.5rem", border: "1px solid var(--line)" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                                        <MapPin size={20} color="var(--success)" />
-                                        <span style={{ fontSize: "0.95rem", fontWeight: 600 }}>{photo.gpsLat.toFixed(6)}, {photo.gpsLng.toFixed(6)}</span>
-                                    </div>
-                                </div>
-                            )}
-                            <div style={{ display: "grid", gap: "0.75rem", fontSize: "0.9rem", color: "var(--muted)", borderTop: "1px solid var(--line)", paddingTop: "1.5rem" }}>
-                                <Row label="Filename" value={photo.filename} />
-                                {photo.width && photo.height && <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />}
-                                <Row label="Size" value={formatBytes(photo.sizeBytes)} />
-                                <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
-                                <Row label="Uploaded" value={formatDate(photo.createdAt)} />
-                            </div>
-                        </aside>
-                    )}
-                </div>
-
-                {/* Mobile Info Sheet */}
-                {showInfo && photo && (
-                    <div className="mobile-only" style={{ ...sheetStyle }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-                            <span style={{ fontWeight: 700, fontSize: "1.1rem" }}>Details</span>
-                            <button onClick={() => setShowInfo(false)} style={{ ...btnStyle, color: "var(--muted)" }}>
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                            {photo.takenAt && <p style={{ fontSize: "1.1rem", fontWeight: 700 }}>{formatDate(photo.takenAt)}</p>}
-                            {(cameraInfo || shootingInfo) && (
-                                <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                                        <Camera size={18} color="var(--accent)" />
-                                        <span style={{ fontSize: "1rem", fontWeight: 600 }}>{cameraInfo || "Camera"}</span>
-                                    </div>
-                                    {shootingInfo && (
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                            <Aperture size={16} color="var(--muted)" />
-                                            <span style={{ fontSize: "0.85rem", color: "var(--ink-2)", fontFamily: "monospace" }}>{shootingInfo}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            {photo.gpsLat && photo.gpsLng && (
-                                <div style={{ background: "var(--bg-subtle)", borderRadius: "1rem", padding: "1rem" }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                        <MapPin size={18} color="var(--success)" />
-                                        <span style={{ fontSize: "0.9rem" }}>{photo.gpsLat.toFixed(5)}, {photo.gpsLng.toFixed(5)}</span>
-                                    </div>
-                                </div>
-                            )}
-                            <div style={{ display: "grid", gap: "0.6rem", fontSize: "0.85rem", color: "var(--muted)", marginTop: "0.5rem" }}>
-                                <Row label="Filename" value={photo.filename} />
-                                {photo.width && photo.height && <Row label="Resolution" value={`${photo.width} × ${photo.height} px`} />}
-                                <Row label="Size" value={formatBytes(photo.sizeBytes)} />
-                                <Row label="Format" value={photo.mimeType.replace("image/", "").toUpperCase()} />
-                                <Row label="Uploaded" value={formatDate(photo.createdAt)} />
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-        </>
-    );
-}
-
-const sheetStyle: React.CSSProperties = {
-    position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70vh",
-    overflowY: "auto", background: "var(--bg-elevated)", backdropFilter: "blur(20px)",
-    padding: "1.5rem", paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))",
-    borderRadius: "1.5rem 1.5rem 0 0", zIndex: 110,
-    color: "var(--ink)", borderTop: "1px solid var(--line)"
-};
-
-/* --- Optimized Slider Component --- */
-
-function PhotoSlider({ idList, currentIndex, photos, onNavigate }: {
-    idList: string[];
-    currentIndex: number;
-    photos: Record<string, PhotoDetail>;
-    onNavigate: (index: number) => void;
-}) {
-    const [dragX, setDragX] = useState(0);
-    const [isDragging, setIsDragging] = useState(false);
-    const [isAnimating, setIsAnimating] = useState(false);
-
-    // Use refs to avoid stale closures in event handlers
-    const dragXRef = useRef(0);
-    const startXRef = useRef(0);
-    const currentIndexRef = useRef(currentIndex);
-    const idListRef = useRef(idList);
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [idList.length, router]);
 
     useEffect(() => {
-        currentIndexRef.current = currentIndex;
-        idListRef.current = idList;
-    }, [currentIndex, idList]);
+        // Prevent browser/page pinch zoom while inside the immersive media viewer.
+        const preventGesture = (e: Event) => {
+            if ("cancelable" in e && (e as Event).cancelable) e.preventDefault();
+        };
+        document.addEventListener("gesturestart", preventGesture, { passive: false });
+        document.addEventListener("gesturechange", preventGesture, { passive: false });
+        document.addEventListener("gestureend", preventGesture, { passive: false });
+        return () => {
+            document.removeEventListener("gesturestart", preventGesture as EventListener);
+            document.removeEventListener("gesturechange", preventGesture as EventListener);
+            document.removeEventListener("gestureend", preventGesture as EventListener);
+        };
+    }, []);
 
-    const handleStart = (clientX: number) => {
-        startXRef.current = clientX;
-        dragXRef.current = 0;
-        setIsDragging(true);
-        setIsAnimating(false);
-    };
-
-    const handleMove = (clientX: number) => {
-        if (!isDragging) return;
-        const delta = clientX - startXRef.current;
-        dragXRef.current = delta;
-        setDragX(delta);
-    };
-
-    const handleEnd = () => {
-        if (!isDragging) return;
-        setIsDragging(false);
-
-        const finalDragX = dragXRef.current;
-        const width = window.innerWidth;
-        const threshold = width / 4;
-
-        if (finalDragX > threshold && currentIndexRef.current > 0) {
-            onNavigate(currentIndexRef.current - 1);
-        } else if (finalDragX < -threshold && currentIndexRef.current < idListRef.current.length - 1) {
-            onNavigate(currentIndexRef.current + 1);
+    const loadComments = useCallback(async (pid: string) => {
+        if (!pid || pid.startsWith("local:")) return;
+        setCommentsLoading(true);
+        const res = await fetch(`/api/photos/${pid}/comments`).catch(() => null);
+        if (res?.ok) {
+            const data = await res.json();
+            setComments((p) => ({ ...p, [pid]: data.comments || [] }));
         }
+        setCommentsLoading(false);
+    }, []);
 
-        setDragX(0);
-        setIsAnimating(true);
-        setTimeout(() => setIsAnimating(false), 300);
+    useEffect(() => {
+        if (!currentId || panel !== "comments" || isLocal) return;
+        if (comments[currentId]) return;
+        void loadComments(currentId);
+    }, [comments, currentId, isLocal, loadComments, panel]);
+
+    const like = async () => {
+        if (!photo || currentId.startsWith("local:")) return;
+        const liked = !photo.isLiked;
+        setPhotos((p) => ({ ...p, [photo.id]: { ...photo, isLiked: liked } }));
+        await fetch("/api/photos/favorite", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: photo.id, liked }) }).catch(() => { });
     };
 
-    const renderSlide = (index: number, offset: number) => {
-        const id = idList[index];
-        if (!id) return null;
-        const photo = photos[id];
-
-        return (
-            <div key={id} style={{
-                position: "absolute",
-                top: 0, left: 0, width: "100%", height: "100%",
-                transform: `translateX(${(offset * 100) + (dragX / window.innerWidth * 100)}%)`,
-                transition: isDragging || !isAnimating ? "none" : "transform 300ms cubic-bezier(0.2, 0, 0, 1)",
-                display: "flex", alignItems: "center", justifyContent: "center"
-            }}>
-                {photo ? (
-                    <ZoomableImage
-                        id={photo.id} src={photo.url}
-                        thumbUrl={photo.thumbUrl}
-                        alt={photo.filename}
-                        isCurrent={offset === 0}
-                    />
-                ) : (
-                    <Loader className="spin" color="#fff" />
-                )}
-            </div>
-        );
+    const del = async () => {
+        if (!photo || currentId.startsWith("local:")) return;
+        const id = photo.id;
+        const next = idList.filter((x) => x !== id);
+        setIdList(next);
+        if (!next.length) router.back();
+        else setIdx((v) => Math.min(v, next.length - 1));
+        await fetch("/api/photos/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [id] }) }).catch(() => { });
     };
+
+    const download = async () => {
+        if (!photo) return;
+        const r = await fetch(photo.url).catch(() => null);
+        if (!r) return window.open(photo.url, "_blank");
+        const b = await r.blob();
+        const u = URL.createObjectURL(b);
+        const a = document.createElement("a");
+        a.href = u;
+        a.download = photo.filename;
+        a.click();
+        URL.revokeObjectURL(u);
+    };
+
+    const addComment = async () => {
+        if (!currentId || !draft.trim() || currentId.startsWith("local:")) return;
+        const body = draft.trim();
+        setDraft("");
+        const temp = `tmp-${Date.now()}`;
+        setComments((p) => ({ ...p, [currentId]: [...(p[currentId] || []), { id: temp, userId: user?.id || "", body, createdAt: new Date().toISOString(), user }] }));
+        const res = await fetch(`/api/photos/${currentId}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body }) }).catch(() => null);
+        if (!res?.ok) return setComments((p) => ({ ...p, [currentId]: (p[currentId] || []).filter((c) => c.id !== temp) }));
+        const data = await res.json();
+        setComments((p) => ({ ...p, [currentId]: (p[currentId] || []).map((c) => c.id === temp ? data.comment : c) }));
+    };
+
+    const saveComment = async (commentId: string) => {
+        if (!currentId || !editingDraft.trim()) return;
+        const body = editingDraft.trim();
+        const prev = comments[currentId] || [];
+        setComments((p) => ({ ...p, [currentId]: (p[currentId] || []).map((c) => c.id === commentId ? { ...c, body } : c) }));
+        setEditingId(null);
+        setEditingDraft("");
+        const res = await fetch(`/api/photos/${currentId}/comments/${commentId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ body }),
+        }).catch(() => null);
+        if (!res?.ok) {
+            setComments((p) => ({ ...p, [currentId]: prev }));
+        }
+    };
+
+    const deleteComment = async (commentId: string) => {
+        if (!currentId) return;
+        const prev = comments[currentId] || [];
+        setComments((p) => ({ ...p, [currentId]: (p[currentId] || []).filter((c) => c.id !== commentId) }));
+        const res = await fetch(`/api/photos/${currentId}/comments/${commentId}`, { method: "DELETE" }).catch(() => null);
+        if (!res?.ok) {
+            setComments((p) => ({ ...p, [currentId]: prev }));
+        }
+    };
+
+    const visibleComments = useMemo(() => (currentId ? comments[currentId] || [] : []), [comments, currentId]);
 
     return (
-        <div
-            style={{ width: "100%", height: "100%", position: "relative", touchAction: "none" }}
-            onMouseDown={(e) => {
-                handleStart(e.clientX);
-                const onMouseMove = (me: MouseEvent) => handleMove(me.clientX);
-                const onMouseUp = () => {
-                    handleEnd();
-                    window.removeEventListener('mousemove', onMouseMove);
-                    window.removeEventListener('mouseup', onMouseUp);
-                };
-                window.addEventListener('mousemove', onMouseMove);
-                window.addEventListener('mouseup', onMouseUp);
-            }}
-            onTouchStart={(e) => {
-                handleStart(e.touches[0].clientX);
-            }}
-            onTouchMove={(e) => {
-                handleMove(e.touches[0].clientX);
-                if (Math.abs(dragXRef.current) > 10) {
-                    if (e.cancelable) e.preventDefault();
-                }
-            }}
-            onTouchEnd={handleEnd}
-        >
-            {renderSlide(currentIndex - 1, -1)}
-            {renderSlide(currentIndex, 0)}
-            {renderSlide(currentIndex + 1, 1)}
+        <div style={{ position: "fixed", inset: 0, background: "#000", color: "#fff", display: "flex", flexDirection: "column", zIndex: 100 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "0.5rem", background: "rgba(0,0,0,0.5)" }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => router.back()}><ArrowLeft size={16} /></button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setIdx((v) => Math.max(0, v - 1))} disabled={idx <= 0}><ChevronLeft size={16} /></button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setIdx((v) => Math.min(idList.length - 1, v + 1))} disabled={idx >= idList.length - 1}><ChevronRight size={16} /></button>
+                </div>
+                {!isLocal && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-ghost btn-sm" onClick={like}><Heart size={16} fill={photo?.isLiked ? "#ff4d6a" : "none"} color={photo?.isLiked ? "#ff4d6a" : "#fff"} /></button>
+                        <button className="btn btn-ghost btn-sm" onClick={download}><Download size={16} /></button>
+                        <button className="btn btn-ghost btn-sm" onClick={del}><Trash2 size={16} color="#f87171" /></button>
+                        <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                                setPanelOpen((open) => (panel === "info" ? !open : true));
+                                setPanel("info");
+                            }}
+                        >
+                            <Info size={16} />
+                        </button>
+                        <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                                setPanelOpen((open) => (panel === "comments" ? !open : true));
+                                setPanel("comments");
+                            }}
+                        >
+                            <MessageCircle size={16} />
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+                <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+                    <Slider ids={idList} idx={idx} photos={photos} setIdx={setIdx} zoomLocked={isZoomed} onZoomChange={setIsZoomed} />
+                    {loading && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><Loader className="spin" /></div>}
+                </div>
+
+                {panelOpen && photo && (
+                    <aside className="desktop-only" style={{ width: 340, background: "var(--bg-elevated)", color: "var(--ink)", borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column" }}>
+                        <div style={{ display: "flex", borderBottom: "1px solid var(--line)" }}>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Info</button>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "comments" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("comments")}>Comments</button>
+                        </div>
+                        {panel === "info" ? (
+                            <InfoSection photo={photo} />
+                        ) : (
+                            <CommentsSection
+                                comments={visibleComments}
+                                loading={commentsLoading}
+                                draft={draft}
+                                setDraft={setDraft}
+                                addComment={addComment}
+                                currentUserId={user?.id || ""}
+                                photoId={currentId || ""}
+                                editingId={editingId}
+                                editingDraft={editingDraft}
+                                setEditingDraft={setEditingDraft}
+                                onStartEdit={(c) => { setEditingId(c.id); setEditingDraft(c.body); }}
+                                onCancelEdit={() => { setEditingId(null); setEditingDraft(""); }}
+                                onSaveEdit={saveComment}
+                                onDelete={deleteComment}
+                            />
+                        )}
+                    </aside>
+                )}
+
+                {panelOpen && photo && (
+                    <div className="mobile-only" style={{ position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "52vh", background: "var(--bg-elevated)", color: "var(--ink)", borderTop: "1px solid var(--line)", zIndex: 35 }}>
+                        <div style={{ display: "flex", borderBottom: "1px solid var(--line)" }}>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Info</button>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "comments" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("comments")}>Comments</button>
+                        </div>
+                        <div style={{ maxHeight: "44vh", overflowY: "auto", paddingBottom: "env(safe-area-inset-bottom)" }}>
+                            {panel === "info" ? (
+                                <InfoSection photo={photo} />
+                            ) : (
+                                <CommentsSection
+                                    comments={visibleComments}
+                                    loading={commentsLoading}
+                                    draft={draft}
+                                    setDraft={setDraft}
+                                    addComment={addComment}
+                                    currentUserId={user?.id || ""}
+                                    photoId={currentId || ""}
+                                    editingId={editingId}
+                                    editingDraft={editingDraft}
+                                    setEditingDraft={setEditingDraft}
+                                    onStartEdit={(c) => { setEditingId(c.id); setEditingDraft(c.body); }}
+                                    onCancelEdit={() => { setEditingId(null); setEditingDraft(""); }}
+                                    onSaveEdit={saveComment}
+                                    onDelete={deleteComment}
+                                />
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
 
-function ZoomableImage({ id, src, thumbUrl, alt, isCurrent }: {
-    id: string; src: string; thumbUrl: string; alt: string; isCurrent: boolean;
-}) {
-    const [scale, setScale] = useState(1);
-    const [fullLoaded, setFullLoaded] = useState(false);
-    const [blobUrl, setBlobUrl] = useState<string | null>(null);
+function InfoSection({ photo }: { photo: PhotoDetail }) {
+    return (
+        <div style={{ padding: "0.9rem", display: "grid", gap: 8, fontSize: 13 }}>
+            <Meta label="Filename" value={photo.filename} />
+            <Meta label="Type" value={mt(photo) === "video" ? "Video" : "Image"} />
+            <Meta label="Format" value={photo.mimeType} />
+            {mt(photo) === "video" && <Meta label="Duration" value={fm(photo.durationMs)} />}
+            {photo.width && photo.height && <Meta label="Resolution" value={`${photo.width} x ${photo.height}`} />}
+            <Meta label="Size" value={fb(photo.sizeBytes)} />
+            <Meta label="Captured" value={photo.takenAt ? fd(photo.takenAt) : "Unknown"} />
+            <Meta label="Uploaded" value={fd(photo.createdAt)} />
+            {photo.cameraModel && <Meta label="Camera" value={photo.cameraModel} />}
+            {photo.lensModel && <Meta label="Lens" value={photo.lensModel} />}
+            {photo.shutterSpeed && <Meta label="Shutter" value={photo.shutterSpeed} />}
+            {photo.aperture && <Meta label="Aperture" value={`f/${photo.aperture}`} />}
+            {photo.iso && <Meta label="ISO" value={`${photo.iso}`} />}
+        </div>
+    );
+}
 
-    useEffect(() => { if (!isCurrent) setScale(1); }, [isCurrent]);
+function CommentsSection({
+    comments,
+    loading,
+    draft,
+    setDraft,
+    addComment,
+    currentUserId,
+    photoId,
+    editingId,
+    editingDraft,
+    setEditingDraft,
+    onStartEdit,
+    onCancelEdit,
+    onSaveEdit,
+    onDelete,
+}: {
+    comments: CommentItem[];
+    loading: boolean;
+    draft: string;
+    setDraft: (v: string) => void;
+    addComment: () => void;
+    currentUserId: string;
+    photoId: string;
+    editingId: string | null;
+    editingDraft: string;
+    setEditingDraft: (v: string) => void;
+    onStartEdit: (c: CommentItem) => void;
+    onCancelEdit: () => void;
+    onSaveEdit: (id: string) => void;
+    onDelete: (id: string) => void;
+}) {
+    return (
+        <div style={{ padding: "0.9rem", display: "grid", gap: 8, fontSize: 13 }}>
+            {photoId?.startsWith("local:") ? (
+                <div style={{ color: "var(--muted)" }}>Comments available after upload completes.</div>
+            ) : (
+                <>
+                    <div style={{ display: "flex", gap: 6 }}>
+                        <textarea className="input" rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Write a comment..." />
+                        <button className="btn btn-primary btn-sm" onClick={addComment} disabled={!draft.trim()}><Send size={14} /></button>
+                    </div>
+                    {loading ? (
+                        <div style={{ display: "grid", placeItems: "center" }}><Loader size={16} className="spin" /></div>
+                    ) : comments.length === 0 ? (
+                        <div style={{ color: "var(--muted)" }}>No comments yet.</div>
+                    ) : (
+                        comments.map((c) => (
+                            <div key={c.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "0.55rem" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
+                                    <strong>{c.user?.full_name || c.user?.username || "User"}</strong>
+                                    <span style={{ color: "var(--muted)" }}>{fd(c.createdAt)}</span>
+                                </div>
+                                {editingId === c.id ? (
+                                    <div style={{ display: "grid", gap: 6 }}>
+                                        <textarea className="input" rows={2} value={editingDraft} onChange={(e) => setEditingDraft(e.target.value)} />
+                                        <div style={{ display: "flex", gap: 6 }}>
+                                            <button className="btn btn-primary btn-sm" onClick={() => onSaveEdit(c.id)}>Save</button>
+                                            <button className="btn btn-secondary btn-sm" onClick={onCancelEdit}>Cancel</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>{c.body}</div>
+                                )}
+                                {c.userId === currentUserId && editingId !== c.id && (
+                                    <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+                                        <button className="btn btn-ghost btn-sm" onClick={() => onStartEdit(c)}>Edit</button>
+                                        <button className="btn btn-ghost btn-sm" style={{ color: "var(--error)" }} onClick={() => onDelete(c.id)}>Delete</button>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </>
+            )}
+        </div>
+    );
+}
+
+function Slider({
+    ids,
+    idx,
+    photos,
+    setIdx,
+    zoomLocked,
+    onZoomChange,
+}: {
+    ids: string[];
+    idx: number;
+    photos: Record<string, PhotoDetail>;
+    setIdx: (v: number) => void;
+    zoomLocked: boolean;
+    onZoomChange: (zoomed: boolean) => void;
+}) {
+    const [dx, setDx] = useState(0);
+    const [drag, setDrag] = useState(false);
+    const sx = useRef(0);
+    const start = (x: number) => { sx.current = x; setDrag(true); };
+    const move = (x: number) => drag && setDx(x - sx.current);
+    const end = () => {
+        if (!drag) return;
+        const th = window.innerWidth / 5;
+        if (dx > th && idx > 0) setIdx(idx - 1);
+        if (dx < -th && idx < ids.length - 1) setIdx(idx + 1);
+        setDx(0);
+        setDrag(false);
+    };
+    const slide = (i: number, off: number) => {
+        const id = ids[i];
+        if (!id) return null;
+        const p = photos[id];
+        return (
+            <div key={id} style={{ position: "absolute", inset: 0, transform: `translateX(calc(${off * 100}% + ${dx}px))`, transition: drag ? "none" : "transform 260ms ease", display: "grid", placeItems: "center" }}>
+                {p ? <Media photo={p} current={off === 0} onZoomChange={off === 0 ? onZoomChange : () => { }} /> : <Loader className="spin" />}
+            </div>
+        );
+    };
+    return (
+        <div style={{ position: "absolute", inset: 0, touchAction: "none" }}
+            onTouchStart={(e) => {
+                if (zoomLocked) return;
+                if (e.touches.length !== 1) return;
+                start(e.touches[0].clientX);
+            }}
+            onTouchMove={(e) => {
+                if (zoomLocked) return;
+                if (e.touches.length !== 1) return;
+                move(e.touches[0].clientX);
+                if (Math.abs(dx) > 8 && e.cancelable) e.preventDefault();
+            }}
+            onTouchEnd={() => {
+                if (zoomLocked) return;
+                end();
+            }}
+            onMouseDown={(e) => {
+                if (zoomLocked) return;
+                start(e.clientX);
+                const mm = (x: MouseEvent) => move(x.clientX);
+                const mu = () => { end(); window.removeEventListener("mousemove", mm); window.removeEventListener("mouseup", mu); };
+                window.addEventListener("mousemove", mm);
+                window.addEventListener("mouseup", mu);
+            }}
+        >
+            {slide(idx - 1, -1)}
+            {slide(idx, 0)}
+            {slide(idx + 1, 1)}
+        </div>
+    );
+}
+
+function Media({ photo, current, onZoomChange }: { photo: PhotoDetail; current: boolean; onZoomChange: (zoomed: boolean) => void }) {
+    const isVideo = mt(photo) === "video";
+    const [src, setSrc] = useState(photo.url);
+    useEffect(() => {
+        if (isVideo || photo.id.startsWith("local:")) return;
+        const c = new AbortController();
+        ImageBlobCache.fetchAndCache(photo.id, photo.url, "full", c.signal).then(setSrc).catch(() => setSrc(photo.url));
+        return () => c.abort();
+    }, [isVideo, photo.id, photo.url]);
+    useEffect(() => {
+        if (isVideo) onZoomChange(false);
+    }, [isVideo, onZoomChange]);
+    if (isVideo) return <CleanVideoPlayer id={photo.id} src={photo.url} poster={photo.thumbUrl || undefined} preload={current ? "metadata" : "none"} />;
+    return <ZoomableImage src={src} alt={photo.filename} onZoomChange={onZoomChange} />;
+}
+
+function CleanVideoPlayer({
+    id,
+    src,
+    poster,
+    preload,
+}: {
+    id: string;
+    src: string;
+    poster?: string;
+    preload: "none" | "metadata";
+}) {
+    const frameRef = useRef<HTMLDivElement | null>(null);
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const [resolvedSrc, setResolvedSrc] = useState(src);
+    const [playing, setPlaying] = useState(false);
+    const [muted, setMuted] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(0);
 
     useEffect(() => {
-        // For local photos, use the src directly (it's a blob URL)
-        if (id.startsWith("local:")) {
-            setBlobUrl(src);
-            return;
-        }
+        setResolvedSrc(src);
+    }, [src]);
 
+    useEffect(() => {
+        if (id.startsWith("local:")) return;
         const controller = new AbortController();
-        const signal = controller.signal;
-
-        (async () => {
-            try {
-                const url = await ImageBlobCache.fetchAndCache(id, src, 'full', signal);
-                setBlobUrl(url);
-            } catch (err: any) {
-                if (err.name === 'AbortError') return;
-                console.warn("❌ Cache/Fetch failure, falling back to src", err);
-                setBlobUrl(src);
-            }
-        })();
+        VideoBlobCache.fetchAndCache(id, src, controller.signal)
+            .then((cachedUrl) => setResolvedSrc(cachedUrl))
+            .catch(() => setResolvedSrc(src));
         return () => controller.abort();
     }, [id, src]);
 
+    useEffect(() => {
+        const v = videoRef.current;
+        if (!v) return;
+        setPlaying(!v.paused && !v.ended);
+        setMuted(v.muted);
+        setCurrentTime(v.currentTime || 0);
+        setDuration(v.duration || 0);
+    }, [resolvedSrc]);
+
+    const sync = () => {
+        const v = videoRef.current;
+        if (!v) return;
+        setPlaying(!v.paused && !v.ended);
+        setMuted(v.muted);
+        setCurrentTime(v.currentTime || 0);
+        setDuration(v.duration || 0);
+    };
+
+    const togglePlay = async () => {
+        const v = videoRef.current;
+        if (!v) return;
+        if (v.paused) await v.play().catch(() => { });
+        else v.pause();
+        sync();
+    };
+
+    const toggleMute = () => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.muted = !v.muted;
+        sync();
+    };
+
+    const seek = (nextSeconds: number) => {
+        const v = videoRef.current;
+        if (!v) return;
+        v.currentTime = Math.max(0, Math.min(Number.isFinite(v.duration) ? v.duration : nextSeconds, nextSeconds));
+        sync();
+    };
+
+    const openFullscreen = async () => {
+        const el = frameRef.current;
+        if (!el || !el.requestFullscreen) return;
+        await el.requestFullscreen().catch(() => { });
+    };
+
     return (
-        <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
-            {!fullLoaded && (
-                <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-                    <img src={thumbUrl} alt="" style={{ position: "absolute", width: "100%", height: "100%", objectFit: "contain", filter: "blur(20px)" }} />
-                    <div className="shimmer" style={{ position: "absolute", inset: 0, zIndex: 1, opacity: 0.2 }} />
+        <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", padding: "0.75rem" }}>
+            <div
+                ref={frameRef}
+                style={{
+                    display: "inline-block",
+                    width: "fit-content",
+                    maxWidth: "100%",
+                    maxHeight: "calc(100vh - 8rem)",
+                    background: "#040404",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    borderRadius: 14,
+                    overflow: "hidden",
+                    position: "relative",
+                }}
+            >
+                <video
+                    ref={videoRef}
+                    src={resolvedSrc}
+                    poster={poster}
+                    preload={preload}
+                    playsInline
+                    onLoadedMetadata={sync}
+                    onTimeUpdate={sync}
+                    onPlay={sync}
+                    onPause={sync}
+                    onVolumeChange={sync}
+                    onClick={togglePlay}
+                    style={{
+                        display: "block",
+                        width: "auto",
+                        height: "auto",
+                        maxWidth: "100%",
+                        maxHeight: "calc(100vh - 8rem)",
+                        objectFit: "contain",
+                        background: "#000",
+                    }}
+                />
+
+                {!playing && (
+                    <button
+                        className="btn btn-primary btn-sm"
+                        onClick={togglePlay}
+                        style={{
+                            position: "absolute",
+                            left: "50%",
+                            top: "50%",
+                            transform: "translate(-50%, -50%)",
+                            borderRadius: 999,
+                            width: 60,
+                            height: 60,
+                            minHeight: 60,
+                            padding: 0,
+                        }}
+                    >
+                        <Play size={26} />
+                    </button>
+                )}
+
+                <div
+                    style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        padding: "0.55rem 0.7rem",
+                        background: "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.2), transparent)",
+                    }}
+                >
+                    <button className="btn btn-ghost btn-sm" style={{ minHeight: 34, height: 34, width: 34, padding: 0 }} onClick={togglePlay}>
+                        {playing ? <Pause size={14} /> : <Play size={14} />}
+                    </button>
+                    <input
+                        type="range"
+                        min={0}
+                        max={Math.max(duration, 0)}
+                        step={0.1}
+                        value={Math.min(currentTime, duration || currentTime)}
+                        onChange={(e) => seek(Number(e.target.value))}
+                        style={{ flex: 1 }}
+                    />
+                    <span style={{ fontSize: 11, minWidth: 76, textAlign: "right" }}>
+                        {fm(Math.round(currentTime * 1000))} / {fm(Math.round(duration * 1000))}
+                    </span>
+                    <button className="btn btn-ghost btn-sm" style={{ minHeight: 34, height: 34, width: 34, padding: 0 }} onClick={toggleMute}>
+                        {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" style={{ minHeight: 34, height: 34, width: 34, padding: 0 }} onClick={openFullscreen}>
+                        <Maximize2 size={14} />
+                    </button>
                 </div>
-            )}
+            </div>
+        </div>
+    );
+}
+
+function ZoomableImage({ src, alt, onZoomChange }: { src: string; alt: string; onZoomChange: (zoomed: boolean) => void }) {
+    const frameRef = useRef<HTMLDivElement | null>(null);
+    const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const pinchStartDistanceRef = useRef<number | null>(null);
+    const pinchStartScaleRef = useRef(1);
+    const panStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+    const [scale, setScale] = useState(1);
+    const [tx, setTx] = useState(0);
+    const [ty, setTy] = useState(0);
+
+    const clampScale = useCallback((value: number) => Math.min(4, Math.max(1, value)), []);
+
+    const clampTranslate = useCallback((x: number, y: number, s = scale) => {
+        const frame = frameRef.current;
+        if (!frame) return { x, y };
+        const maxX = Math.max(0, ((s - 1) * frame.clientWidth) / 2);
+        const maxY = Math.max(0, ((s - 1) * frame.clientHeight) / 2);
+        return {
+            x: Math.max(-maxX, Math.min(maxX, x)),
+            y: Math.max(-maxY, Math.min(maxY, y)),
+        };
+    }, [scale]);
+
+    useEffect(() => {
+        const zoomed = scale > 1.01;
+        onZoomChange(zoomed);
+        if (!zoomed) {
+            setTx(0);
+            setTy(0);
+        }
+    }, [onZoomChange, scale]);
+
+    useEffect(() => {
+        setScale(1);
+        setTx(0);
+        setTy(0);
+        pointersRef.current.clear();
+        pinchStartDistanceRef.current = null;
+        panStartRef.current = null;
+        onZoomChange(false);
+    }, [onZoomChange, src]);
+
+    const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        const el = e.currentTarget;
+        el.setPointerCapture(e.pointerId);
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pointersRef.current.size === 1 && scale > 1) {
+            panStartRef.current = { x: e.clientX, y: e.clientY, tx, ty };
+        }
+
+        if (pointersRef.current.size === 2) {
+            const pts = Array.from(pointersRef.current.values());
+            pinchStartDistanceRef.current = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            pinchStartScaleRef.current = scale;
+            panStartRef.current = null;
+        }
+    };
+
+    const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!pointersRef.current.has(e.pointerId)) return;
+        pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (pointersRef.current.size >= 2) {
+            const pts = Array.from(pointersRef.current.values());
+            const currentDistance = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            const baseDistance = pinchStartDistanceRef.current || currentDistance;
+            const nextScale = clampScale((pinchStartScaleRef.current || 1) * (currentDistance / Math.max(baseDistance, 1)));
+            setScale(nextScale);
+            if (e.cancelable) e.preventDefault();
+            return;
+        }
+
+        if (scale > 1 && panStartRef.current) {
+            const dx = e.clientX - panStartRef.current.x;
+            const dy = e.clientY - panStartRef.current.y;
+            const next = clampTranslate(panStartRef.current.tx + dx, panStartRef.current.ty + dy);
+            setTx(next.x);
+            setTy(next.y);
+            if (e.cancelable) e.preventDefault();
+        }
+    };
+
+    const endPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+        pointersRef.current.delete(e.pointerId);
+        if (pointersRef.current.size < 2) {
+            pinchStartDistanceRef.current = null;
+        }
+        if (pointersRef.current.size === 0) {
+            panStartRef.current = null;
+        }
+    };
+
+    const toggleZoom = () => {
+        if (scale > 1) {
+            setScale(1);
+            setTx(0);
+            setTy(0);
+        } else {
+            setScale(2);
+        }
+    };
+
+    return (
+        <div
+            ref={frameRef}
+            style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", overflow: "hidden", touchAction: "none" }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endPointer}
+            onPointerCancel={endPointer}
+            onDoubleClick={toggleZoom}
+            onTouchMove={(e) => {
+                if (scale > 1 && e.cancelable) e.preventDefault();
+            }}
+        >
             <img
-                src={blobUrl || src} alt={alt}
-                onLoad={() => setFullLoaded(true)}
+                src={src}
+                alt={alt}
                 draggable={false}
                 style={{
-                    maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
-                    opacity: fullLoaded ? 1 : 0,
-                    transform: `scale(${scale})`,
-                    transition: "transform 200ms ease, opacity 300ms ease",
-                    zIndex: 1, userSelect: "none"
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    objectFit: "contain",
+                    transform: `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`,
+                    transformOrigin: "center center",
+                    transition: pointersRef.current.size === 0 ? "transform 120ms ease-out" : "none",
+                    userSelect: "none",
+                    WebkitUserSelect: "none",
+                    pointerEvents: "none",
                 }}
             />
         </div>
     );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-    return (
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "var(--muted)" }}>{label}</span>
-            <span style={{ color: "var(--ink)", fontWeight: 500, textAlign: "right", maxWidth: "65%", wordBreak: "break-all" }}>{value}</span>
-        </div>
-    );
+function Meta({ label, value }: { label: string; value: string }) {
+    return <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><span style={{ color: "var(--muted)" }}>{label}</span><span style={{ textAlign: "right" }}>{value}</span></div>;
 }

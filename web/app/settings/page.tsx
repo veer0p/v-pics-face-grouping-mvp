@@ -20,6 +20,7 @@ import {
 import { useTheme } from "@/components/ThemeProvider";
 import { ACCENT_PALETTES } from "@/lib/palettes";
 import { useAuth } from "@/components/AuthContext";
+import { uploadToR2 } from "@/lib/upload-utils";
 
 const STORAGE_CAP_BYTES = 15 * 1024 * 1024 * 1024;
 
@@ -76,7 +77,7 @@ export default function SettingsPage() {
             .join("") || fallback;
     };
 
-    const toAvatarDataUrl = async (file: File): Promise<string> => {
+    const toAvatarBlob = async (file: File): Promise<Blob> => {
         const size = 320;
         const canvas = document.createElement("canvas");
         canvas.width = size;
@@ -122,12 +123,7 @@ export default function SettingsPage() {
             );
         });
 
-        return await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ""));
-            reader.onerror = () => reject(new Error("Failed to encode avatar image"));
-            reader.readAsDataURL(blob);
-        });
+        return blob;
     };
 
     const handleAvatarChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -142,11 +138,24 @@ export default function SettingsPage() {
                 throw new Error("Please select a valid image file.");
             }
 
-            const avatarUrl = await toAvatarDataUrl(file);
+            const avatarBlob = await toAvatarBlob(file);
+            const avatarFile = new File([avatarBlob], "avatar.webp", { type: "image/webp" });
+
+            const presignRes = await fetch("/api/profile/avatar/presign", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contentType: avatarFile.type }),
+            });
+            const presignData = await presignRes.json();
+            if (!presignRes.ok) {
+                throw new Error(presignData?.error || "Failed to initialize avatar upload.");
+            }
+
+            await uploadToR2(avatarFile, String(presignData.uploadUrl), () => { });
             const res = await fetch("/api/profile", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ avatarUrl }),
+                body: JSON.stringify({ avatarKey: presignData.avatarKey }),
             });
 
             const data = await res.json();

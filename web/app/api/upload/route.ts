@@ -11,15 +11,24 @@ function mustEnv(name: string): string {
     return v;
 }
 
+function normalizeEndpoint(raw: string): string {
+    try {
+        const parsed = new URL(raw);
+        return `${parsed.protocol}//${parsed.host}`;
+    } catch {
+        throw new Error("R2_ENDPOINT must be a valid URL");
+    }
+}
+
 let _s3: S3Client | null = null;
 function getS3(): S3Client {
     if (!_s3) {
         _s3 = new S3Client({
-            endpoint: mustEnv("B2_ENDPOINT"),
-            region: process.env.B2_REGION || "eu-central-003",
+            endpoint: normalizeEndpoint(mustEnv("R2_ENDPOINT")),
+            region: process.env.R2_REGION || "auto",
             credentials: {
-                accessKeyId: mustEnv("B2_KEY_ID"),
-                secretAccessKey: mustEnv("B2_APP_KEY"),
+                accessKeyId: mustEnv("R2_ACCESS_KEY_ID"),
+                secretAccessKey: mustEnv("R2_SECRET_ACCESS_KEY"),
             },
             forcePathStyle: true,
         });
@@ -124,7 +133,7 @@ export async function POST(req: NextRequest) {
 
         const supabase = createServiceClient();
         const s3 = getS3();
-        const bucket = mustEnv("B2_BUCKET_NAME");
+        const bucket = mustEnv("R2_BUCKET_NAME");
         const uploaded: { id: string; key: string }[] = [];
 
         for (const file of files) {
@@ -167,7 +176,7 @@ export async function POST(req: NextRequest) {
                 extractAllExif(buffer),
             ]);
 
-            // Upload original to B2
+            // Upload original to R2
             await s3.send(new PutObjectCommand({
                 Bucket: bucket, Key: originalKey, Body: buffer, ContentType: file.type,
                 CacheControl: "public, max-age=31536000, immutable",
@@ -189,8 +198,10 @@ export async function POST(req: NextRequest) {
                     thumb_key: thumbBuffer ? thumbKey : null,
                     original_name: safeFilename,
                     mime_type: file.type,
+                    media_type: "image",
                     size_bytes: file.size,
                     width, height,
+                    duration_ms: null,
                     thumb_width: thumbWidth,
                     thumb_height: thumbHeight,
                     blurhash,

@@ -53,6 +53,11 @@ WORKER_ID=local-worker-1
 WORKER_POLL_SECONDS=5
 WORKER_LEASE_SECONDS=300
 WORKER_HEARTBEAT_SECONDS=30
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+R2_REGION=auto
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=v-pics
 ```
 
 ## Supabase Setup (Required)
@@ -119,7 +124,7 @@ python worker/main.py --once
 1. Open web UI.
 2. Select up to 30 images.
 3. Click `Start Grouping`.
-4. UI uploads files to private Supabase bucket and queues job.
+4. UI uploads files to private Cloudflare R2 bucket and queues job.
 5. Worker claims job, processes faces, stores cluster results.
 6. Job page auto-polls and displays people-wise grouped faces.
 
@@ -149,6 +154,17 @@ What it runs:
 - Python tests (`pytest`)
 - Web lint
 - Web production build
+
+## Docker (Web Only)
+
+Run the existing web app in Docker on `localhost:3000` (for Nginx reverse proxy setups):
+
+```bash
+copy .env.production.example .env.production
+docker compose up -d --build
+```
+
+For existing VPS in-place update (same domain/site), use the same deployed repo path and restart only the existing web service after pulling latest code.
 
 ## Troubleshooting
 

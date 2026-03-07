@@ -11,8 +11,17 @@ export type FileMetadata = {
     gps_lat?: number;
     gps_lng?: number;
     orientation?: number;
-    exif_raw?: any;
+    exif_raw?: unknown;
     content_hash?: string;
+};
+
+export type MediaMetadataResult = {
+    metadata: FileMetadata;
+    takenAt: string | null;
+    width?: number;
+    height?: number;
+    durationMs?: number | null;
+    mediaType: "image" | "video";
 };
 
 /**
@@ -185,10 +194,64 @@ export async function generateThumbnail(file: File, maxDim = 400): Promise<Blob>
     });
 }
 
+async function generateVideoThumbnail(file: File, maxDim = 400): Promise<Blob> {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        const video = document.createElement("video");
+        video.preload = "metadata";
+        video.muted = true;
+        video.playsInline = true;
+        video.src = objectUrl;
+
+        await new Promise<void>((resolve, reject) => {
+            video.onloadedmetadata = () => resolve();
+            video.onerror = () => reject(new Error("Failed to load video metadata"));
+        });
+
+        const targetWidth = video.videoWidth > video.videoHeight
+            ? maxDim
+            : Math.max(1, Math.round((video.videoWidth * maxDim) / Math.max(video.videoHeight, 1)));
+        const targetHeight = video.videoHeight >= video.videoWidth
+            ? maxDim
+            : Math.max(1, Math.round((video.videoHeight * maxDim) / Math.max(video.videoWidth, 1)));
+
+        video.currentTime = Number.isFinite(video.duration) && video.duration > 1 ? 1 : 0;
+        await new Promise<void>((resolve) => {
+            video.onseeked = () => resolve();
+            setTimeout(resolve, 250);
+        });
+
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("Failed to get canvas context");
+        ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+        const blob = await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob(
+                (out) => (out ? resolve(out) : reject(new Error("Video thumbnail conversion failed"))),
+                "image/webp",
+                0.82,
+            );
+        });
+        return blob;
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
+export async function generateMediaThumbnail(file: File, maxDim = 400): Promise<Blob> {
+    if (file.type.startsWith("video/")) {
+        return generateVideoThumbnail(file, maxDim);
+    }
+    return generateThumbnail(file, maxDim);
+}
+
 /**
- * Upload a file directly to B2 using a presigned URL with progress tracking.
+ * Upload a file directly to R2 using a presigned URL with progress tracking.
  */
-export async function uploadToB2(
+export async function uploadToR2(
     file: File,
     uploadUrl: string,
     onProgress: (percent: number) => void
@@ -204,22 +267,22 @@ export async function uploadToB2(
         xhr.upload.onprogress = (e) => {
             if (e.lengthComputable) {
                 const pct = Math.round((e.loaded / e.total) * 100);
-                console.log(`[B2-UPLOAD]   Progress: ${pct}% (${(e.loaded / 1024 / 1024).toFixed(2)}/${(e.total / 1024 / 1024).toFixed(2)} MB)`);
+                console.log(`[R2-UPLOAD]   Progress: ${pct}% (${(e.loaded / 1024 / 1024).toFixed(2)}/${(e.total / 1024 / 1024).toFixed(2)} MB)`);
                 onProgress(pct);
             }
         };
 
         xhr.onload = () => {
-            console.log(`[B2-UPLOAD] ✅ onload fired. Status: ${xhr.status} ${xhr.statusText}`);
-            console.log(`[B2-UPLOAD]   Response Headers: ${xhr.getAllResponseHeaders()}`);
-            console.log(`[B2-UPLOAD]   Response Body (first 500 chars): ${xhr.responseText?.substring(0, 500)}`);
+            console.log(`[R2-UPLOAD] ✅ onload fired. Status: ${xhr.status} ${xhr.statusText}`);
+            console.log(`[R2-UPLOAD]   Response Headers: ${xhr.getAllResponseHeaders()}`);
+            console.log(`[R2-UPLOAD]   Response Body (first 500 chars): ${xhr.responseText?.substring(0, 500)}`);
             if (xhr.status >= 200 && xhr.status < 300) resolve();
-            else reject(new Error(`B2 Upload Failed: ${xhr.status} ${xhr.statusText}. Body: ${xhr.responseText?.substring(0, 200)}`));
+            else reject(new Error(`R2 Upload Failed: ${xhr.status} ${xhr.statusText}. Body: ${xhr.responseText?.substring(0, 200)}`));
         };
 
         xhr.onerror = () => {
-            console.error("B2 Transport Error (Check CORS):", xhr);
-            reject(new Error("B2 Network Error (Usually CORS)"));
+            console.error("R2 Transport Error (Check CORS):", xhr);
+            reject(new Error("R2 Network Error (Usually CORS)"));
         };
 
         xhr.send(file);
@@ -227,13 +290,13 @@ export async function uploadToB2(
 }
 
 /**
- * Diagnostic tool to check if B2 is reachable from the client.
+ * Diagnostic tool to check if R2 is reachable from the client.
  */
-export async function testB2Connectivity(): Promise<{ ok: boolean; error?: string }> {
+export async function testR2Connectivity(): Promise<{ ok: boolean; error?: string }> {
     try {
         const res = await fetch("/api/upload/presign?filename=test-connection.txt&type=text/plain");
         if (!res.ok) {
-            console.error(`[B2-TEST] Presign request failed: ${res.status} ${res.statusText}`);
+            console.error(`[R2-TEST] Presign request failed: ${res.status} ${res.statusText}`);
             return { ok: false, error: "Server failed to generate test URL" };
         }
         const { uploadUrl } = await res.json();
@@ -244,7 +307,7 @@ export async function testB2Connectivity(): Promise<{ ok: boolean; error?: strin
             xhr.setRequestHeader("Content-Type", "text/plain");
             xhr.onload = () => {
                 if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true });
-                else resolve({ ok: false, error: `B2 Rejected (Status: ${xhr.status}). Response: ${xhr.responseText?.substring(0, 200)}` });
+                else resolve({ ok: false, error: `R2 Rejected (Status: ${xhr.status}). Response: ${xhr.responseText?.substring(0, 200)}` });
             };
             xhr.onerror = () => {
                 // If status is 0, it's almost always CORS or local network blocking
@@ -253,8 +316,59 @@ export async function testB2Connectivity(): Promise<{ ok: boolean; error?: strin
 
             xhr.send("test-connection");
         });
-    } catch (err: any) {
-        console.error(`[B2-TEST] Exception:`, err);
-        return { ok: false, error: err.message };
+    } catch (err: unknown) {
+        console.error(`[R2-TEST] Exception:`, err);
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+}
+
+async function extractVideoMetadata(file: File): Promise<MediaMetadataResult> {
+    const objectUrl = URL.createObjectURL(file);
+    try {
+        const video = document.createElement("video");
+        video.preload = "metadata";
+        video.muted = true;
+        video.playsInline = true;
+        video.src = objectUrl;
+
+        await new Promise<void>((resolve, reject) => {
+            video.onloadedmetadata = () => resolve();
+            video.onerror = () => reject(new Error("Failed to load video metadata"));
+        });
+
+        return {
+            metadata: {},
+            takenAt: null,
+            width: Number.isFinite(video.videoWidth) ? video.videoWidth : undefined,
+            height: Number.isFinite(video.videoHeight) ? video.videoHeight : undefined,
+            durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null,
+            mediaType: "video",
+        };
+    } catch (err) {
+        console.error("Video metadata extraction error:", err);
+        return {
+            metadata: {},
+            takenAt: null,
+            durationMs: null,
+            mediaType: "video",
+        };
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
+export async function extractMediaMetadata(file: File): Promise<MediaMetadataResult> {
+    if (file.type.startsWith("video/")) {
+        return extractVideoMetadata(file);
+    }
+
+    const image = await extractBrowserExif(file);
+    return {
+        metadata: image.metadata,
+        takenAt: image.takenAt,
+        width: image.width,
+        height: image.height,
+        durationMs: null,
+        mediaType: "image",
+    };
 }

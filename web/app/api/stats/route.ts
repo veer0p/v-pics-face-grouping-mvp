@@ -10,7 +10,6 @@ export async function GET() {
         const { data, error } = await supabase
             .from("photos")
             .select("size_bytes, is_deleted, is_liked")
-            .eq("user_id", user.id)
             .limit(10000);
 
         if (error) return NextResponse.json({ error: "DB error" }, { status: 500 });

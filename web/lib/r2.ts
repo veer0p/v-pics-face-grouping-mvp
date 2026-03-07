@@ -7,34 +7,47 @@ function mustEnv(name: string): string {
     return v;
 }
 
+function normalizeEndpoint(raw: string): string {
+    let parsed: URL;
+    try {
+        parsed = new URL(raw);
+    } catch {
+        throw new Error("R2_ENDPOINT must be a valid URL");
+    }
+
+    // Accept accidental bucket suffixes like https://<account>.r2.cloudflarestorage.com/<bucket>
+    // and normalize to the account endpoint.
+    return `${parsed.protocol}//${parsed.host}`;
+}
+
 let _client: S3Client | null = null;
 
 export function getClient(): S3Client {
     if (!_client) {
         _client = new S3Client({
-            endpoint: mustEnv("B2_ENDPOINT"),
-            region: process.env.B2_REGION || "eu-central-003",
+            endpoint: normalizeEndpoint(mustEnv("R2_ENDPOINT")),
+            region: process.env.R2_REGION || "auto",
             credentials: {
-                accessKeyId: mustEnv("B2_KEY_ID"),
-                secretAccessKey: mustEnv("B2_APP_KEY"),
+                accessKeyId: mustEnv("R2_ACCESS_KEY_ID"),
+                secretAccessKey: mustEnv("R2_SECRET_ACCESS_KEY"),
             },
-            forcePathStyle: true, // Required for B2 S3-compatible API
+            forcePathStyle: true,
         });
     }
     return _client;
 }
 
 export function getBucket(): string {
-    return mustEnv("B2_BUCKET_NAME");
+    return mustEnv("R2_BUCKET_NAME");
 }
 
 /**
- * Generate a presigned PUT URL for uploading a file to B2.
+ * Generate a presigned PUT URL for uploading a file to R2.
  */
 export async function getUploadUrl(
     key: string,
     contentType: string,
-    expiresIn = 300, // 5 minutes
+    expiresIn = 300,
 ): Promise<string> {
     const command = new PutObjectCommand({
         Bucket: getBucket(),
@@ -45,11 +58,11 @@ export async function getUploadUrl(
 }
 
 /**
- * Generate a presigned GET URL for reading a file from B2.
+ * Generate a presigned GET URL for reading a file from R2.
  */
 export async function getReadUrl(
     key: string,
-    expiresIn = 3600, // 1 hour
+    expiresIn = 3600,
 ): Promise<string> {
     const command = new GetObjectCommand({
         Bucket: getBucket(),
@@ -59,7 +72,7 @@ export async function getReadUrl(
 }
 
 /**
- * Delete an object from B2.
+ * Delete an object from R2.
  */
 export async function deleteObject(key: string): Promise<void> {
     const command = new DeleteObjectCommand({

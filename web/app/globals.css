@@ -188,6 +188,23 @@ button {
     cursor: pointer;
 }
 
+.input {
+    width: 100%;
+    min-height: 44px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--bg-elevated);
+    color: var(--ink);
+    padding: 0.6rem 0.75rem;
+    font-size: 0.92rem;
+}
+
+.input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 img {
     display: block;
     max-width: 100%;

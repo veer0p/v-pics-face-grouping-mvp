@@ -17,6 +17,11 @@ const getMimeFromExt = (name: string) => {
     if (ext === "png") return "image/png";
     if (ext === "webp") return "image/webp";
     if (ext === "heic") return "image/heic";
+    if (ext === "mp4") return "video/mp4";
+    if (ext === "mov") return "video/quicktime";
+    if (ext === "webm") return "video/webm";
+    if (ext === "m4v") return "video/x-m4v";
+    if (ext === "ogg" || ext === "ogv") return "video/ogg";
     return "application/octet-stream";
 };
 
@@ -65,7 +70,7 @@ export default function UploadPage() {
 
                 if (name.includes("__MACOSX") || name.endsWith("/")) continue;
                 const mime = getMimeFromExt(name);
-                if (!mime.startsWith("image/")) continue;
+                if (!mime.startsWith("image/") && !mime.startsWith("video/")) continue;
 
                 // Copy bytes into a fresh ArrayBuffer-backed view for strict TS BlobPart typing.
                 const bytes = new Uint8Array(data.byteLength);
@@ -94,7 +99,7 @@ export default function UploadPage() {
                 normalized.push(...zipFiles);
                 continue;
             }
-            if (file.type.startsWith("image/")) {
+            if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
                 normalized.push(file);
             }
         }
@@ -205,7 +210,7 @@ export default function UploadPage() {
                         {processing ? "Preparing uploads..." : "Upload Photos & ZIPs"}
                     </p>
                     <p style={{ fontSize: "0.88rem", color: "var(--muted)" }}>
-                        Drag files here or use the buttons below
+                        Drag media files here or use the buttons below
                     </p>
                 </div>
 
@@ -245,7 +250,7 @@ export default function UploadPage() {
                     ref={inputRef}
                     type="file"
                     multiple
-                    accept="image/*"
+                    accept="image/*,video/*"
                     hidden
                     onChange={(event) => {
                         if (!event.target.files) return;

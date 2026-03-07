@@ -7,6 +7,13 @@ export async function middleware(request: NextRequest) {
     const isLoginPath = pathname.startsWith("/login");
     const isApiPath = pathname.startsWith("/api");
     const isPublicFile = pathname.match(/\.(.*)$/);
+    const isPublicApi =
+        pathname.startsWith("/api/auth/login") ||
+        pathname.startsWith("/api/auth/signup") ||
+        pathname.startsWith("/api/auth/quick-unlock") ||
+        pathname.startsWith("/api/auth/me") ||
+        pathname.startsWith("/api/auth/logout") ||
+        pathname.startsWith("/api/upload/cleanup");
 
     // Skip middleware for public files (manifest, images, etc.)
     if (isPublicFile && !isApiPath) {
@@ -17,7 +24,7 @@ export async function middleware(request: NextRequest) {
     if (!sessionCookie && !isLoginPath) {
         // Special case for API
         if (isApiPath) {
-            // Allow only specific public APIs if any
+            if (isPublicApi) return NextResponse.next();
             return new NextResponse(JSON.stringify({ error: "Unauthorized" }), {
                 status: 401,
                 headers: { "Content-Type": "application/json" }

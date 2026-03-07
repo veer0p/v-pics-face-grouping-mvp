@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { hashSessionToken, parseSessionCookieValue, SESSION_COOKIE_NAME } from "@/lib/auth-server";
 
 function mustEnv(name: string): string {
   const value = process.env[name];
@@ -83,17 +84,66 @@ export async function createRequestClient() {
  */
 export async function getAuthenticatedProfile() {
   const cookieStore = await cookies();
-  const profileId = cookieStore.get("v-pics-session")?.value;
+  const rawCookie = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!rawCookie) return null;
 
-  if (!profileId) return null;
+  const supabase = createServiceClient();
+  const parsed = parseSessionCookieValue(rawCookie);
 
-  const supabase = createServiceClient(); // Service role for internal check
-  const { data, error } = await supabase
-    .from("users")
-    .select("*")
-    .eq("id", profileId)
+  // Backward compatibility: legacy cookie stored plain user_id.
+  if (!parsed) {
+    const { data: legacyUser, error: legacyError } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", rawCookie)
+      .maybeSingle();
+
+    if (legacyError || !legacyUser) return null;
+    return legacyUser;
+  }
+
+  const tokenHash = hashSessionToken(parsed.token);
+  const nowIso = new Date().toISOString();
+
+  const { data: session, error: sessionError } = await supabase
+    .from("auth_sessions")
+    .select("id, user_id, expires_at, revoked_at")
+    .eq("id", parsed.sessionId)
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .gt("expires_at", nowIso)
     .single();
 
-  if (error || !data) return null;
-  return data;
+  if (sessionError || !session) return null;
+
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", session.user_id)
+    .single();
+
+  if (userError || !user) return null;
+  return user;
+}
+
+export async function getActiveSession() {
+  const cookieStore = await cookies();
+  const parsed = parseSessionCookieValue(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  if (!parsed) return null;
+
+  const supabase = createServiceClient();
+  const tokenHash = hashSessionToken(parsed.token);
+  const nowIso = new Date().toISOString();
+
+  const { data: session, error } = await supabase
+    .from("auth_sessions")
+    .select("*")
+    .eq("id", parsed.sessionId)
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .gt("expires_at", nowIso)
+    .single();
+
+  if (error || !session) return null;
+  return session;
 }

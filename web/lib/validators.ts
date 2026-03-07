@@ -5,7 +5,12 @@ export const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 export const uploadFileInputSchema = z.object({
   name: z.string().trim().min(1).max(255),
-  type: z.string().trim().min(1).max(200),
+  type: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .refine((value) => value.startsWith("image/"), "Face grouping accepts image files only in phase 1."),
   size: z.number().int().nonnegative().max(MAX_FILE_BYTES),
 });
 

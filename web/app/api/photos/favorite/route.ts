@@ -15,8 +15,7 @@ export async function POST(req: NextRequest) {
         const { error } = await supabase
             .from("photos")
             .update({ is_liked: !!liked })
-            .eq("id", id)
-            .eq("user_id", user.id);
+            .eq("id", id);
 
         if (error) return NextResponse.json({ error: "DB error" }, { status: 500 });
         return NextResponse.json({ ok: true });

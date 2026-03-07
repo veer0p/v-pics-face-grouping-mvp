@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
-import { deleteObject } from "@/lib/b2";
+import { deleteObject } from "@/lib/r2";
 
 /**
  * POST /api/upload/complete
  * Records a successful upload in the database with client-extracted metadata.
- * Ensures atomicity by cleaning up B2 objects if DB insertion fails.
+ * Ensures atomicity by cleaning up R2 objects if DB insertion fails.
  */
 export async function POST(req: NextRequest) {
     let original_key: string | undefined;
@@ -27,9 +27,11 @@ export async function POST(req: NextRequest) {
             id,
             original_name,
             mime_type,
+            media_type,
             size_bytes,
             width,
             height,
+            duration_ms,
             blurhash,
             taken_at,
             content_hash,
@@ -49,9 +51,11 @@ export async function POST(req: NextRequest) {
                 original_name,
                 thumb_key,
                 mime_type: mime_type || "image/jpeg",
+                media_type: media_type === "video" ? "video" : "image",
                 size_bytes: size_bytes || 0,
                 width,
                 height,
+                duration_ms: duration_ms ?? null,
                 blurhash,
                 taken_at,
                 content_hash,
@@ -73,9 +77,9 @@ export async function POST(req: NextRequest) {
         if (error) {
             console.error("DB Insert Error:", error);
 
-            // Cleanup B2 objects on failure
+            // Cleanup R2 objects on failure
             if (original_key || thumb_key) {
-                console.log(`[UPLOAD-ROLLBACK] Cleaning up B2 for ${original_name}...`);
+                console.log(`[UPLOAD-ROLLBACK] Cleaning up R2 for ${original_name}...`);
                 const deletions: Promise<void>[] = [];
                 if (original_key) deletions.push(deleteObject(original_key));
                 if (thumb_key) deletions.push(deleteObject(thumb_key));
@@ -104,3 +108,4 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 }
+

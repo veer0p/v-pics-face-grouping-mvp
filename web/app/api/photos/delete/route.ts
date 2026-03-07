@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { getClient, getBucket } from "@/lib/b2";
+import { getClient, getBucket } from "@/lib/r2";
 
 export const maxDuration = 30;
 
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
                         await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: photo.thumb_key }));
                     }
                 } catch (err) {
-                    console.error(`[Delete API] B2 delete failed for ${photo.original_key}:`, err);
+                    console.error(`[Delete API] R2 delete failed for ${photo.original_key}:`, err);
                 }
             }
 
@@ -92,3 +92,4 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 }
+

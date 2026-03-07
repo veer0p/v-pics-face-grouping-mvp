@@ -125,6 +125,10 @@ def run_pipeline(
     processed_images = 0
 
     for image in images:
+        if not str(image.mime_type or "").lower().startswith("image/"):
+            # Phase 1 guardrail: videos are excluded from face-grouping.
+            continue
+
         blob = download_image(image.object_path)
         frame = _decode_image(blob)
         if frame is None:

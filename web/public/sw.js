@@ -22,8 +22,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
-    // Skip cross-origin requests (B2 storage, Supabase, etc.) to avoid CORS issues
-    if (!event.request.url.startsWith(self.location.origin)) return;
+    const reqUrl = new URL(event.request.url);
+    // Skip cross-origin requests (R2 storage, Supabase, etc.) to avoid CORS issues
+    if (reqUrl.origin !== self.location.origin) return;
+    // Skip API routes to avoid caching signed/proxied media responses.
+    if (reqUrl.pathname.startsWith('/api/')) return;
     event.respondWith(
         caches.match(event.request).then((cached) => {
             const fetched = fetch(event.request).then((response) => {

@@ -1,71 +1,119 @@
 "use client";
-import React, { useState, useEffect } from "react";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Camera, Delete, Fingerprint, Loader } from "lucide-react";
 import { useAuth } from "@/components/AuthContext";
-import { useTheme } from "@/components/ThemeProvider";
-import { Loader, Lock, Camera, Fingerprint, Delete } from "lucide-react";
+
+type Mode = "unlock" | "signin" | "signup";
+
+function isPinValid(pin: string) {
+    return /^\d{4}$/.test(pin);
+}
 
 export default function LoginPage() {
-    const { resolved } = useTheme();
-    const [pin, setPin] = useState("");
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(false);
-    const { user, loading: authLoading, signInWithPin } = useAuth();
     const router = useRouter();
+    const {
+        user,
+        loading: authLoading,
+        signInWithPin,
+        signUpWithPin,
+        rememberedUsername,
+        clearRememberedUsername,
+    } = useAuth();
 
-    // Keyboard support
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (authLoading || loading) return;
+    const [mode, setMode] = useState<Mode>(rememberedUsername ? "unlock" : "signin");
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-            if (e.key >= "0" && e.key <= "9") {
-                handlePinPress(e.key);
-            } else if (e.key === "Backspace") {
-                handleDelete();
-            }
-        };
+    const [unlockPin, setUnlockPin] = useState("");
+    const [signinUsername, setSigninUsername] = useState(rememberedUsername || "");
+    const [signinPin, setSigninPin] = useState("");
+    const [signupUsername, setSignupUsername] = useState("");
+    const [signupFullName, setSignupFullName] = useState("");
+    const [signupPin, setSignupPin] = useState("");
+    const [signupConfirmPin, setSignupConfirmPin] = useState("");
 
-        window.addEventListener("keydown", handleKeyDown);
-        return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [authLoading, loading, pin]); // Dependency on pin ensures it stays fresh if used internally
-
-    // Redirect if already logged in
     useEffect(() => {
         if (!authLoading && user) {
             router.replace("/");
         }
-    }, [user, authLoading, router]);
+    }, [authLoading, router, user]);
 
-    const handlePinPress = (num: string) => {
-        if (pin.length < 4) {
-            const newPin = pin + num;
-            setPin(newPin);
-            if (newPin.length === 4) {
-                submitPin(newPin);
+    const unlockDots = useMemo(() => [0, 1, 2, 3], []);
+    const activeMode: Mode = mode === "unlock" && !rememberedUsername ? "signin" : mode;
+
+    const handleUnlockDigit = async (digit: string) => {
+        if (submitting || unlockPin.length >= 4) return;
+        const next = `${unlockPin}${digit}`;
+        setUnlockPin(next);
+        setError(null);
+
+        if (next.length === 4) {
+            setSubmitting(true);
+            const ok = await signInWithPin(next);
+            if (!ok) {
+                setError("Invalid PIN.");
+                setUnlockPin("");
             }
+            setSubmitting(false);
         }
     };
 
-    const handleDelete = () => {
-        setPin(pin.slice(0, -1));
-        setError(false);
+    const handleUnlockDelete = () => {
+        if (submitting) return;
+        setUnlockPin((prev) => prev.slice(0, -1));
+        setError(null);
     };
 
-    const submitPin = async (finalPin: string) => {
-        setLoading(true);
-        const success = await signInWithPin(finalPin);
-        if (!success) {
-            setError(true);
-            setPin("");
-            // Haptic feedback shake would go here
-            setTimeout(() => setError(false), 500);
+    const handleSignInSubmit = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!isPinValid(signinPin)) {
+            setError("PIN must be exactly 4 digits.");
+            return;
         }
-        setLoading(false);
+        setSubmitting(true);
+        setError(null);
+        const ok = await signInWithPin(signinPin, signinUsername);
+        if (!ok) setError("Invalid username or PIN.");
+        setSubmitting(false);
+    };
+
+    const handleSignUpSubmit = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!signupUsername.trim()) {
+            setError("Username is required.");
+            return;
+        }
+        if (!signupFullName.trim()) {
+            setError("Full name is required.");
+            return;
+        }
+        if (!isPinValid(signupPin)) {
+            setError("PIN must be exactly 4 digits.");
+            return;
+        }
+        if (signupPin !== signupConfirmPin) {
+            setError("PIN confirmation does not match.");
+            return;
+        }
+
+        setSubmitting(true);
+        setError(null);
+        const result = await signUpWithPin({
+            username: signupUsername,
+            fullName: signupFullName,
+            pin: signupPin,
+        });
+        if (!result.ok) {
+            setError(result.error || "Failed to create account.");
+        }
+        setSubmitting(false);
     };
 
     if (authLoading || (user && !authLoading)) {
         return (
-            <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+            <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
                 <Loader className="spin" color="var(--accent)" />
             </div>
         );
@@ -78,147 +126,192 @@ export default function LoginPage() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: "var(--bg)",
-            backgroundImage: resolved === "dark"
-                ? "radial-gradient(circle at center, var(--bg-subtle) 0%, var(--bg) 100%)"
-                : "none",
-            color: "var(--ink)",
             padding: "2rem",
-            userSelect: "none"
+            gap: "1rem",
         }}>
-            {/* Header */}
-            <div style={{ marginBottom: "2rem", textAlign: "center" }}>
-                <div style={{
-                    width: "64px",
-                    height: "64px",
-                    borderRadius: "50%",
-                    background: `linear-gradient(135deg, var(--accent), var(--accent-2))`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    margin: "0 auto 1.5rem",
-                    boxShadow: resolved === "dark" ? "0 0 30px var(--accent-soft)" : "none",
-                    border: resolved === "light" ? "1px solid var(--line)" : "none",
-                }}>
-                    <Camera size={28} color={resolved === "dark" ? "#000" : "#fff"} />
-                </div>
-                <h1 style={{ fontSize: "1.25rem", letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 700 }}>Vault Access</h1>
-                <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: "0.5rem" }}>Enter PIN for Veer</p>
-            </div>
-
-            {/* PIN Dots */}
             <div style={{
-                display: "flex",
-                gap: "1.5rem",
-                marginBottom: "3rem",
-                transform: error ? "translateX(10px)" : "none",
-                transition: "transform 0.1s ease"
-            }}>
-                {[0, 1, 2, 3].map((i) => (
-                    <div key={i} style={{
-                        width: "16px",
-                        height: "16px",
-                        borderRadius: "50%",
-                        border: `2px solid ${error ? "var(--error)" : "var(--accent)"}`,
-                        background: pin.length > i ? (error ? "var(--error)" : "var(--accent)") : "transparent",
-                        boxShadow: pin.length > i ? `0 0 10px ${error ? "var(--error)" : "var(--accent)"}` : "none",
-                        transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
-                    }} />
-                ))}
-            </div>
-
-            {/* Num Pad */}
-            <div style={{
+                width: 64,
+                height: 64,
+                borderRadius: "50%",
                 display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "1.5rem",
-                maxWidth: "280px"
+                placeItems: "center",
+                background: "linear-gradient(135deg,var(--accent),var(--accent-2))",
             }}>
-                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                    <button
-                        key={num}
-                        onClick={() => handlePinPress(num)}
-                        disabled={loading}
-                        style={{
-                            width: "72px",
-                            height: "72px",
-                            borderRadius: "50%",
-                            border: "1px solid var(--line)",
-                            background: "var(--bg-subtle)",
-                            color: "var(--ink)",
-                            fontSize: "1.5rem",
-                            fontWeight: 500,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            transition: "all 0.1s"
-                        }}
-                        onMouseDown={(e) => e.currentTarget.style.background = "var(--line)"}
-                        onMouseUp={(e) => e.currentTarget.style.background = "var(--bg-subtle)"}
-                    >
-                        {num}
-                    </button>
-                ))}
-
-                {/* Bottom Row */}
-                <button
-                    className="btn-icon"
-                    onClick={() => { }} // Placeholder for Biometrics
-                    style={{ background: "transparent", border: "none" }}
-                    title="Touch ID / Face ID"
-                >
-                    <Fingerprint size={28} color="var(--muted)" />
-                </button>
-
-                <button
-                    onClick={() => handlePinPress("0")}
-                    disabled={loading}
-                    style={{
-                        width: "72px",
-                        height: "72px",
-                        borderRadius: "50%",
-                        border: "1px solid var(--line)",
-                        background: "var(--bg-subtle)",
-                        color: "var(--ink)",
-                        fontSize: "1.5rem",
-                        fontWeight: 500,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer"
-                    }}
-                >
-                    0
-                </button>
-
-                <button
-                    onClick={handleDelete}
-                    style={{
-                        width: "72px",
-                        height: "72px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--muted)",
-                        cursor: "pointer"
-                    }}
-                >
-                    <Delete size={28} />
-                </button>
+                <Camera size={28} color="#fff" />
             </div>
-
-            {loading && (
-                <div style={{ marginTop: "2rem" }}>
-                    <Loader className="spin" size={24} color="var(--accent)" />
-                </div>
+            <h1 style={{ fontSize: "1.4rem", fontWeight: 700 }}>Vault Access</h1>
+            {activeMode === "unlock" && rememberedUsername && (
+                <p style={{ color: "var(--muted)", fontSize: "0.9rem" }}>
+                    Welcome back <strong>{rememberedUsername}</strong>
+                </p>
             )}
 
-            <p style={{ marginTop: "4rem", fontSize: "0.7rem", color: "var(--muted-2)", letterSpacing: "0.1em" }}>
-                VEER'S PRIVATE VAULT
-            </p>
+            {error && (
+                <p style={{ color: "var(--error)", fontWeight: 600, fontSize: "0.85rem" }}>{error}</p>
+            )}
+
+            {activeMode === "unlock" && rememberedUsername ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
+                    <div style={{ display: "flex", gap: "0.9rem", marginBottom: "0.5rem" }}>
+                        {unlockDots.map((idx) => (
+                            <span
+                                key={idx}
+                                style={{
+                                    width: 14,
+                                    height: 14,
+                                    borderRadius: "50%",
+                                    border: "2px solid var(--accent)",
+                                    background: unlockPin.length > idx ? "var(--accent)" : "transparent",
+                                }}
+                            />
+                        ))}
+                    </div>
+                    <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, 72px)",
+                        gap: "0.8rem",
+                    }}>
+                        {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
+                            <button
+                                key={digit}
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => void handleUnlockDigit(digit)}
+                                className="btn"
+                                style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
+                            >
+                                {digit}
+                            </button>
+                        ))}
+                        <button
+                            type="button"
+                            className="btn"
+                            title="Biometric support is planned for phase 2"
+                            onClick={() => alert("Biometric-ready flow is planned for phase 2. Use PIN for now.")}
+                            style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
+                        >
+                            <Fingerprint size={18} />
+                        </button>
+                        <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={() => void handleUnlockDigit("0")}
+                            className="btn"
+                            style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
+                        >
+                            0
+                        </button>
+                        <button
+                            type="button"
+                            disabled={submitting}
+                            onClick={handleUnlockDelete}
+                            className="btn"
+                            style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
+                        >
+                            <Delete size={16} />
+                        </button>
+                    </div>
+                    <button
+                        className="btn btn-secondary"
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => {
+                            clearRememberedUsername();
+                            setMode("signin");
+                            setUnlockPin("");
+                            setError(null);
+                        }}
+                    >
+                        Use Different Account
+                    </button>
+                </div>
+            ) : (
+                <div style={{ width: "100%", maxWidth: 360 }}>
+                    {activeMode === "signin" ? (
+                        <form onSubmit={handleSignInSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+                            <input
+                                value={signinUsername}
+                                onChange={(e) => setSigninUsername(e.target.value)}
+                                placeholder="Username"
+                                autoComplete="username"
+                                className="input"
+                            />
+                            <input
+                                value={signinPin}
+                                onChange={(e) => setSigninPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                                placeholder="4-digit PIN"
+                                inputMode="numeric"
+                                autoComplete="current-password"
+                                className="input"
+                            />
+                            <button className="btn btn-primary" type="submit" disabled={submitting}>
+                                {submitting ? <Loader size={16} className="spin" /> : "Sign In"}
+                            </button>
+                        </form>
+                    ) : (
+                        <form onSubmit={handleSignUpSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+                            <input
+                                value={signupUsername}
+                                onChange={(e) => setSignupUsername(e.target.value)}
+                                placeholder="Username (a-z, 0-9, _)"
+                                autoComplete="username"
+                                className="input"
+                            />
+                            <input
+                                value={signupFullName}
+                                onChange={(e) => setSignupFullName(e.target.value)}
+                                placeholder="Full name"
+                                autoComplete="name"
+                                className="input"
+                            />
+                            <input
+                                value={signupPin}
+                                onChange={(e) => setSignupPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                                placeholder="Create 4-digit PIN"
+                                inputMode="numeric"
+                                autoComplete="new-password"
+                                className="input"
+                            />
+                            <input
+                                value={signupConfirmPin}
+                                onChange={(e) => setSignupConfirmPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                                placeholder="Confirm PIN"
+                                inputMode="numeric"
+                                autoComplete="new-password"
+                                className="input"
+                            />
+                            <button className="btn btn-primary" type="submit" disabled={submitting}>
+                                {submitting ? <Loader size={16} className="spin" /> : "Create Account"}
+                            </button>
+                        </form>
+                    )}
+
+                    <div style={{ marginTop: "0.9rem", display: "flex", justifyContent: "space-between" }}>
+                        <button
+                            className="btn btn-ghost btn-sm"
+                            type="button"
+                            onClick={() => {
+                                setMode(activeMode === "signin" ? "signup" : "signin");
+                                setError(null);
+                            }}
+                        >
+                            {activeMode === "signin" ? "New user? Sign up" : "Already have an account? Sign in"}
+                        </button>
+                        {rememberedUsername && (
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                type="button"
+                                onClick={() => {
+                                    setMode("unlock");
+                                    setError(null);
+                                }}
+                            >
+                                Quick Unlock
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

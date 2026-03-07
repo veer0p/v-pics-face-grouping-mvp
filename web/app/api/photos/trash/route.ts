@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
-import { getReadUrl } from "@/lib/b2";
+import { getReadUrl } from "@/lib/r2";
 
 // Get trash (soft-deleted photos)
 export async function GET() {
@@ -34,3 +34,4 @@ export async function GET() {
         return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }
+

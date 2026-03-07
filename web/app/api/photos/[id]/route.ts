@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
-import { getReadUrl } from "@/lib/b2";
+import { getReadUrl } from "@/lib/r2";
 
 export async function GET(
     _req: Request,
@@ -17,16 +17,15 @@ export async function GET(
             .from("photos")
             .select("*")
             .eq("id", id)
-            .eq("user_id", user.id)
             .eq("is_deleted", false)
             .single();
 
         if (error || !photo) {
-            console.warn(`❌ B2 (Not found: ${id})`);
+            console.warn(`❌ R2 (Not found: ${id})`);
             return NextResponse.json({ error: "Photo not found" }, { status: 404 });
         }
 
-        console.log(`❌ B2 (Signing single photo: ${id})`);
+        console.log(`❌ R2 (Signing single photo: ${id})`);
         const url = await getReadUrl(photo.original_key, 7200);
         const thumbUrl = photo.thumb_key ? await getReadUrl(photo.thumb_key) : url;
 
@@ -56,9 +55,12 @@ export async function GET(
                 exifRaw: photo.exif_raw,
                 createdAt: photo.created_at,
                 contentHash: photo.content_hash,
+                mediaType: photo.media_type || (String(photo.mime_type || "").startsWith("video/") ? "video" : "image"),
+                durationMs: photo.duration_ms ?? null,
             },
         });
     } catch {
         return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }
+

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteObject } from "@/lib/b2";
+import { deleteObject } from "@/lib/r2";
 
 /**
  * POST /api/upload/cleanup
- * Cleans up orphaned B2 objects if an upload or DB insertion fails.
+ * Cleans up orphaned R2 objects if an upload or DB insertion fails.
  */
 export async function POST(req: NextRequest) {
     try {
@@ -27,3 +27,4 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Cleanup failed" }, { status: 500 });
     }
 }
+

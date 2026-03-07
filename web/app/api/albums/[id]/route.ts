@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
-import { getReadUrl } from "@/lib/b2";
+import { getReadUrl } from "@/lib/r2";
 
 /**
  * GET /api/albums/[id]
@@ -120,3 +120,4 @@ export async function PATCH(
         return NextResponse.json({ error: "Internal error" }, { status: 500 });
     }
 }
+

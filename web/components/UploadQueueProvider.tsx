@@ -2,9 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthContext";
-import { useNetwork } from "@/components/NetworkContext";
 import { UploadQueueStore, type UploadQueueItem } from "@/lib/upload-queue";
-import { calculateHash, extractBrowserExif, generateThumbnail, uploadToB2 } from "@/lib/upload-utils";
+import { calculateHash, extractMediaMetadata, generateMediaThumbnail, uploadToR2 } from "@/lib/upload-utils";
 import { PhotoMetadataCache } from "@/lib/photo-cache";
 
 const MAX_HASHES_PER_REQUEST = 500;
@@ -28,6 +27,8 @@ export type PendingUploadItem = {
     sizeBytes: number;
     createdAt: string;
     takenAt: string | null;
+    durationMs: number | null;
+    mediaType: "image" | "video";
     contentHash: string | null;
     status: UploadQueueItem["status"];
     progress: number;
@@ -195,13 +196,21 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             if (!currentItem.content_hash) {
                 const [hash, exif] = await Promise.all([
                     calculateHash(currentItem.file_blob as File).catch(() => null),
-                    extractBrowserExif(currentItem.file_blob as File).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 })),
+                    extractMediaMetadata(currentItem.file_blob as File).catch(() => ({
+                        metadata: {},
+                        takenAt: null,
+                        width: 0,
+                        height: 0,
+                        durationMs: null,
+                        mediaType: currentItem.mime_type.startsWith("video/") ? "video" : "image",
+                    })),
                 ]);
                 const patched = await patchQueueItem(currentItem.local_id, {
                     content_hash: hash,
                     taken_at: exif.takenAt,
                     width: exif.width || null,
                     height: exif.height || null,
+                    duration_ms: exif.durationMs ?? null,
                     metadata: exif.metadata || {},
                 });
                 if (patched) currentItem = patched;
@@ -231,15 +240,15 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
             await patchQueueItem(currentItem.local_id, { progress: 20 }, false);
 
-            const uploadPromise = uploadToB2(currentItem.file_blob as File, uploadUrl, (pct) => {
+            const uploadPromise = uploadToR2(currentItem.file_blob as File, uploadUrl, (pct) => {
                 void patchQueueItem(currentItem.local_id, { progress: 20 + Math.round(pct * 0.5) }, false);
             });
 
             const thumbPromise = (async () => {
                 try {
-                    const thumbBlob = await generateThumbnail(currentItem.file_blob as File);
+                    const thumbBlob = await generateMediaThumbnail(currentItem.file_blob as File);
                     const thumbFile = new File([thumbBlob], `thumb_${currentItem.original_name}`, { type: "image/webp" });
-                    await uploadToB2(thumbFile, thumbUploadUrl, () => { });
+                    await uploadToR2(thumbFile, thumbUploadUrl, () => { });
                 } catch (err) {
                     console.warn("[UPLOAD-QUEUE] thumbnail generation/upload failed:", err);
                 }
@@ -265,9 +274,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                     original_name: currentItem.original_name,
                     thumb_key: thumbKey,
                     mime_type: currentItem.mime_type,
+                    media_type: currentItem.mime_type.startsWith("video/") ? "video" : "image",
                     size_bytes: currentItem.size_bytes,
                     width: currentItem.width,
                     height: currentItem.height,
+                    duration_ms: currentItem.duration_ms,
                     taken_at: currentItem.taken_at,
                     content_hash: currentItem.content_hash,
                     metadata: currentItem.metadata,
@@ -349,7 +360,14 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         await withConcurrency(createdItems, META_CONCURRENCY, async (item) => {
             const [hash, exif] = await Promise.all([
                 calculateHash(item.file_blob as File).catch(() => null),
-                extractBrowserExif(item.file_blob as File).catch(() => ({ metadata: {}, takenAt: null, width: 0, height: 0 })),
+                extractMediaMetadata(item.file_blob as File).catch(() => ({
+                    metadata: {},
+                    takenAt: null,
+                    width: 0,
+                    height: 0,
+                    durationMs: null,
+                    mediaType: item.mime_type.startsWith("video/") ? "video" : "image",
+                })),
             ]);
 
             preparedHashes.set(item.local_id, hash);
@@ -358,6 +376,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 taken_at: exif.takenAt,
                 width: exif.width || null,
                 height: exif.height || null,
+                duration_ms: exif.durationMs ?? null,
                 metadata: exif.metadata || {},
             });
         });
@@ -458,6 +477,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 taken_at: null,
                 width: null,
                 height: null,
+                duration_ms: null,
                 content_hash: null,
                 metadata: {},
                 status: "pending_hash",
@@ -560,19 +580,23 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 const items = await UploadQueueStore.getUserItems(user.id);
                 const resetItems = items
                     .map((item) => {
+                        const normalized = {
+                            ...item,
+                            duration_ms: item.duration_ms ?? null,
+                        };
                         if (item.status === "failed") {
-                            return { ...item, attempts: 0, last_attempt_at: null };
+                            return { ...normalized, attempts: 0, last_attempt_at: null };
                         }
                         if (item.status === "uploading" || item.status === "pending_hash") {
                             return {
-                                ...item,
+                                ...normalized,
                                 status: "queued_upload" as const,
                                 progress: 0,
                                 error: null,
                                 last_attempt_at: null,
                             };
                         }
-                        return item;
+                        return normalized;
                     })
                     .filter((item) => item.status !== "duplicate_skipped");
                 await UploadQueueStore.putItems(resetItems);
@@ -645,6 +669,8 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 sizeBytes: item.size_bytes,
                 createdAt: item.created_at,
                 takenAt: item.taken_at,
+                durationMs: item.duration_ms,
+                mediaType: (item.mime_type.startsWith("video/") ? "video" : "image") as PendingUploadItem["mediaType"],
                 contentHash: item.content_hash,
                 status: item.status,
                 progress: item.progress,

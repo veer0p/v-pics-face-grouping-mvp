@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUploadUrl } from "@/lib/b2";
+import { getUploadUrl } from "@/lib/r2";
 import { v4 as uuidv4 } from "uuid";
 
 /**
  * GET /api/upload/presign?filename=foo.jpg&type=image/jpeg
- * Returns a presigned URL for direct client-to-B2 upload.
+ * Returns a presigned URL for direct client-to-R2 upload.
  */
 export async function GET(req: NextRequest) {
     try {
@@ -40,3 +40,4 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Failed to generate upload URL" }, { status: 500 });
     }
 }
+

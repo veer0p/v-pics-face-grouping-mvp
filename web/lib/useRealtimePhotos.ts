@@ -36,7 +36,6 @@ export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhot
                 async (payload: { new: any }) => {
                     const row = payload.new;
                     if (row.is_deleted) return;
-                    if (row.user_id && row.user_id !== user.id) return;
 
                     try {
                         const res = await fetch(`/api/photos/${row.id}`);
@@ -62,7 +61,6 @@ export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhot
                 { event: "UPDATE", schema: "public", table: "photos" },
                 async (payload: { new: any }) => {
                     const row = payload.new;
-                    if (row.user_id && row.user_id !== user.id) return;
 
                     // If soft-deleted, remove from the list
                     if (row.is_deleted) {
@@ -92,7 +90,6 @@ export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhot
                 { event: "DELETE", schema: "public", table: "photos" },
                 async (payload: { old: any }) => {
                     const row = payload.old;
-                    if (row.user_id && row.user_id !== user.id) return;
                     setPhotos((prev) => prev.filter((p) => p.id !== row.id));
                     // Invalidate cache
                     await PhotoMetadataCache.clear();
@@ -110,5 +107,5 @@ export function useRealtimePhotos({ setPhotos, enabled = true }: UseRealtimePhot
             supabase.removeChannel(channel);
             channelRef.current = null;
         };
-    }, [enabled, setPhotos, authLoading, user?.id, isOnline]);
+    }, [enabled, setPhotos, authLoading, isOnline, user]);
 }

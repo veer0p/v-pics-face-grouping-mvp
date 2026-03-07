@@ -1,7 +1,7 @@
 /**
  * Smart Photo Cache Utility (IndexedDB + 2GB Quota)
  * 1. Caches photo metadata with server-side hash validation.
- * 2. Caches thumbnails (500MB) and full-size images (1.5GB) separately.
+ * 2. Caches thumbnails, full-size images, and videos separately.
  * 3. Implements LRU eviction to maintain quota.
  */
 
@@ -19,11 +19,16 @@ export type Photo = {
     takenAt: string | null;
     createdAt: string;
     contentHash?: string | null;
+    mediaType?: "image" | "video";
+    durationMs?: number | null;
 };
+
+type BlobCategory = "thumb" | "full" | "video";
 
 // Quotas in bytes
 const THUMB_QUOTA = 500 * 1024 * 1024; // 500 MB
 const FULL_QUOTA = 1500 * 1024 * 1024; // 1.5 GB
+const VIDEO_QUOTA = 2000 * 1024 * 1024; // 2 GB
 
 class IndexedDBStore {
     private db: IDBDatabase | null = null;
@@ -123,7 +128,7 @@ class IndexedDBStore {
         tx.objectStore("metadata").clear();
     }
 
-    async saveImage(id: string, blob: Blob, category: 'thumb' | 'full') {
+    async saveImage(id: string, blob: Blob, category: BlobCategory) {
         const db = await this.getDB();
         const key = `${category}:${id}`;
         // 1. Check/Evict if needed
@@ -140,7 +145,7 @@ class IndexedDBStore {
         });
     }
 
-    async getImage(id: string, category: 'thumb' | 'full'): Promise<Blob | null> {
+    async getImage(id: string, category: BlobCategory): Promise<Blob | null> {
         const db = await this.getDB();
         const key = `${category}:${id}`;
         const tx = db.transaction("images", "readwrite");
@@ -161,8 +166,13 @@ class IndexedDBStore {
         });
     }
 
-    private async evictIfNeeded(category: 'thumb' | 'full', newSize: number) {
-        const quota = category === 'thumb' ? THUMB_QUOTA : FULL_QUOTA;
+    private async evictIfNeeded(category: BlobCategory, newSize: number) {
+        const quota =
+            category === "thumb"
+                ? THUMB_QUOTA
+                : category === "full"
+                    ? FULL_QUOTA
+                    : VIDEO_QUOTA;
         const db = await this.getDB();
 
         let currentUsage = await this.getCategoryUsage(category);
@@ -195,7 +205,7 @@ class IndexedDBStore {
         });
     }
 
-    private async getCategoryUsage(category: 'thumb' | 'full'): Promise<number> {
+    private async getCategoryUsage(category: BlobCategory): Promise<number> {
         const db = await this.getDB();
         const tx = db.transaction("images", "readonly");
         const store = tx.objectStore("images");
@@ -366,16 +376,24 @@ export const PhotoDetailCache = {
  * Image Blob Caching
  */
 const inFlightImageFetches = new Map<string, Promise<string>>();
+const inFlightVideoFetches = new Map<string, Promise<string>>();
+
+function getStorageFetchUrl(url: string) {
+    if (url.includes("r2.cloudflarestorage.com") || url.includes(".r2.dev")) {
+        return `/api/photos/proxy?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+}
 
 export const ImageBlobCache = {
-    async get(id: string, category: 'thumb' | 'full'): Promise<string | null> {
+    async get(id: string, category: "thumb" | "full"): Promise<string | null> {
         if (typeof window === "undefined") return null;
         const blob = await Store.getImage(id, category);
         if (!blob) return null;
         return URL.createObjectURL(blob);
     },
 
-    async fetchAndCache(id: string, url: string, category: 'thumb' | 'full' = 'full', signal?: AbortSignal): Promise<string> {
+    async fetchAndCache(id: string, url: string, category: "thumb" | "full" = "full", signal?: AbortSignal): Promise<string> {
         if (typeof window === "undefined") return url;
 
         const key = `${category}:${id}`;
@@ -391,17 +409,12 @@ export const ImageBlobCache = {
             return inFlightImageFetches.get(key)!;
         }
 
-        // 3. Fetch from network (proxy B2 URLs to bypass CORS)
+        // 3. Fetch from network (proxy R2 URLs to bypass CORS)
         console.warn(`📡 [Network] Fetching ${category}... (id:${id.slice(0, 8)})`);
 
         const fetchPromise = (async () => {
             try {
-                let fetchUrl = url;
-                if (url.includes('backblazeb2.com')) {
-                    fetchUrl = `/api/photos/proxy?url=${encodeURIComponent(url)}`;
-                }
-
-                const res = await fetch(fetchUrl, { signal });
+                const res = await fetch(getStorageFetchUrl(url), { signal });
                 if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
                 const blob = await res.blob();
 
@@ -423,4 +436,53 @@ export const ImageBlobCache = {
         inFlightImageFetches.set(key, fetchPromise);
         return fetchPromise;
     }
+};
+
+/**
+ * Video Blob Caching
+ */
+export const VideoBlobCache = {
+    async get(id: string): Promise<string | null> {
+        if (typeof window === "undefined") return null;
+        const blob = await Store.getImage(id, "video");
+        if (!blob) return null;
+        return URL.createObjectURL(blob);
+    },
+
+    async fetchAndCache(id: string, url: string, signal?: AbortSignal): Promise<string> {
+        if (typeof window === "undefined") return url;
+
+        const key = `video:${id}`;
+
+        const cachedUrl = await this.get(id);
+        if (cachedUrl) {
+            return cachedUrl;
+        }
+
+        if (inFlightVideoFetches.has(key)) {
+            return inFlightVideoFetches.get(key)!;
+        }
+
+        console.warn(`ðŸ“¡ [Network] Fetching video... (id:${id.slice(0, 8)})`);
+
+        const fetchPromise = (async () => {
+            try {
+                const res = await fetch(getStorageFetchUrl(url), { signal });
+                if (!res.ok) throw new Error(`Failed to fetch video: ${res.status}`);
+                const blob = await res.blob();
+                await Store.saveImage(id, blob, "video");
+                return URL.createObjectURL(blob);
+            } catch (err: any) {
+                if (err.name === "AbortError") {
+                    console.debug(`ðŸ›‘ [Cache] Video fetch aborted (${key})`);
+                }
+                throw err;
+            } finally {
+                inFlightVideoFetches.delete(key);
+            }
+        })();
+
+        inFlightVideoFetches.set(key, fetchPromise);
+        return fetchPromise;
+    },
 };

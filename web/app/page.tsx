@@ -4,10 +4,10 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, CloudCheck,
+    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, CloudCheck, Play,
 } from "lucide-react";
 import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
-import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
+import { PhotoMetadataCache, VideoBlobCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
 import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
 import { useNetwork } from "@/components/NetworkContext";
@@ -25,6 +25,8 @@ type LocalGalleryPhoto = {
     sizeBytes: number;
     isLiked: false;
     takenAt: string | null;
+    durationMs: number | null;
+    mediaType: "image" | "video";
     createdAt: string;
     status: PendingUploadItem["status"];
     progress: number;
@@ -35,6 +37,20 @@ type LocalGalleryPhoto = {
 
 type ServerGalleryPhoto = Photo & { kind: "server" };
 type GalleryPhoto = ServerGalleryPhoto | LocalGalleryPhoto;
+
+function mediaTypeOf(photo: { mediaType?: string; mimeType?: string }) {
+    if (photo.mediaType === "video") return "video";
+    if (String(photo.mimeType || "").startsWith("video/")) return "video";
+    return "image";
+}
+
+function formatDuration(durationMs: number | null | undefined) {
+    if (!durationMs || durationMs <= 0) return "0:00";
+    const totalSec = Math.floor(durationMs / 1000);
+    const mins = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${mins}:${String(sec).padStart(2, "0")}`;
+}
 
 export default function HomePage() {
     const router = useRouter();
@@ -362,6 +378,8 @@ export default function HomePage() {
             sizeBytes: item.sizeBytes,
             isLiked: false,
             takenAt: item.takenAt,
+            durationMs: item.durationMs,
+            mediaType: item.mediaType,
             createdAt: item.createdAt,
             status: item.status,
             progress: item.progress,
@@ -529,9 +547,12 @@ export default function HomePage() {
                                                 sessionStorage.setItem("local_photo_preview", JSON.stringify({
                                                     id: photo.id,
                                                     url: photo.url,
+                                                    thumbUrl: photo.thumbUrl,
                                                     filename: photo.filename,
                                                     mimeType: photo.mimeType,
                                                     sizeBytes: photo.sizeBytes,
+                                                    durationMs: photo.durationMs,
+                                                    mediaType: photo.mediaType,
                                                     createdAt: photo.createdAt,
                                                 }));
                                                 sessionStorage.setItem("current_gallery_context", JSON.stringify([photo.id]));
@@ -548,21 +569,57 @@ export default function HomePage() {
                                             router.push(`/photo/${photo.id}`);
                                         }}
                                     >
-                                        {isLocal ? (
-                                            <img
-                                                src={photo.thumbUrl || photo.url}
-                                                alt=""
-                                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                            />
-                                        ) : (
-                                            <CachedImage
-                                                id={photo.id}
-                                                src={photo.thumbUrl || photo.url}
-                                                alt=""
-                                                className="w-full h-full object-cover block transition-opacity duration-150"
-                                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                                category="thumb"
-                                            />
+                                        {(() => {
+                                            const isVideo = mediaTypeOf(photo) === "video";
+                                            if (isVideo) {
+                                                return (
+                                                    <AutoPlayVideoThumb
+                                                        id={photo.id}
+                                                        src={photo.url}
+                                                        poster={photo.thumbUrl && photo.thumbUrl !== photo.url ? photo.thumbUrl : undefined}
+                                                    />
+                                                );
+                                            }
+                                            if (isLocal) {
+                                                return (
+                                                    <img
+                                                        src={photo.thumbUrl || photo.url}
+                                                        alt=""
+                                                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                                    />
+                                                );
+                                            }
+
+                                            return (
+                                                <CachedImage
+                                                    id={photo.id}
+                                                    src={photo.thumbUrl || photo.url}
+                                                    alt=""
+                                                    className="w-full h-full object-cover block transition-opacity duration-150"
+                                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                                    category="thumb"
+                                                />
+                                            );
+                                        })()}
+
+                                        {mediaTypeOf(photo) === "video" && (
+                                            <div style={{
+                                                position: "absolute",
+                                                left: 8,
+                                                bottom: 8,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 4,
+                                                padding: "2px 6px",
+                                                borderRadius: 999,
+                                                background: "rgba(0,0,0,0.55)",
+                                                color: "#fff",
+                                                fontSize: 11,
+                                                fontWeight: 700,
+                                            }}>
+                                                <Play size={10} fill="#fff" color="#fff" />
+                                                <span>{formatDuration(photo.durationMs)}</span>
+                                            </div>
                                         )}
 
                                         {!isLocal && photo.isLiked && !selectMode && (
@@ -671,5 +728,70 @@ export default function HomePage() {
                 )
             }
         </div >
+    );
+}
+
+function AutoPlayVideoThumb({ id, src, poster }: { id: string; src: string; poster?: string }) {
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const [inView, setInView] = useState(false);
+    const [resolvedSrc, setResolvedSrc] = useState(src);
+
+    useEffect(() => {
+        setResolvedSrc(src);
+    }, [src]);
+
+    useEffect(() => {
+        const el = videoRef.current;
+        if (!el) return;
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                setInView(entry.isIntersecting && entry.intersectionRatio >= 0.6);
+            },
+            { threshold: [0, 0.6, 1] },
+        );
+
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        const el = videoRef.current;
+        if (!el) return;
+
+        if (!inView) {
+            el.pause();
+            return;
+        }
+
+        const playPromise = el.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch(() => { });
+        }
+    }, [inView, resolvedSrc]);
+
+    useEffect(() => {
+        if (!inView) return;
+        if (id.startsWith("local:")) return;
+
+        const controller = new AbortController();
+        VideoBlobCache.fetchAndCache(id, src, controller.signal)
+            .then((cachedUrl) => setResolvedSrc(cachedUrl))
+            .catch(() => setResolvedSrc(src));
+
+        return () => controller.abort();
+    }, [id, inView, src]);
+
+    return (
+        <video
+            ref={videoRef}
+            src={resolvedSrc}
+            poster={poster}
+            muted
+            loop
+            playsInline
+            preload="none"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
     );
 }

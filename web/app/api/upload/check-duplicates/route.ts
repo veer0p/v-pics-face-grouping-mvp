@@ -39,7 +39,6 @@ export async function POST(req: NextRequest) {
         const { data, error } = await supabase
             .from("photos")
             .select("content_hash")
-            .eq("user_id", user.id)
             .eq("is_deleted", false)
             .in("content_hash", hashes);
 

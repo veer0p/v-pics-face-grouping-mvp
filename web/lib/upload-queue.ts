@@ -25,6 +25,7 @@ export type UploadQueueItem = {
     height: number | null;
     content_hash: string | null;
     metadata: FileMetadata;
+    duration_ms: number | null;
     status: UploadQueueStatus;
     progress: number;
     error: string | null;
