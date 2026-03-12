@@ -3,6 +3,8 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Home, Search, Users, FolderOpen, Settings } from "lucide-react";
+import { useAuth } from "@/components/AuthContext";
+import { UserAvatar } from "@/components/UserAvatar";
 
 const NAV_ITEMS = [
     { href: "/", Icon: Home, label: "Photos" },
@@ -14,6 +16,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
     const pathname = usePathname();
+    const { user } = useAuth();
 
     return (
         <aside className="sidebar">
@@ -46,9 +49,11 @@ export function Sidebar() {
 
             {/* Profile / Avatar at bottom */}
             <div className="sidebar-item" style={{ marginTop: 'auto', borderTop: '1px solid var(--line)', paddingTop: '1.5rem', borderRadius: 0 }}>
-                <div className="app-avatar" style={{ width: '1.5rem', height: '1.5rem' }}>
-                    <div className="app-avatar-inner" />
-                </div>
+                <UserAvatar
+                    src={user?.avatar_url}
+                    name={user?.full_name || user?.username || "User"}
+                    size={24}
+                />
                 <span>Account</span>
             </div>
         </aside>

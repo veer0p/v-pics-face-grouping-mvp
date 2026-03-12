@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Loader, Maximize2, MessageCircle, Pause, Play, Send, Trash2, Users, Volume2, VolumeX } from "lucide-react";
 import { ImageBlobCache, PhotoDetailCache, VideoBlobCache } from "@/lib/photo-cache";
 import { useAuth } from "@/components/AuthContext";
+import { UserAvatar } from "@/components/UserAvatar";
 
 type PhotoDetail = {
     id: string;
@@ -34,7 +35,7 @@ type CommentItem = {
     userId: string;
     body: string;
     createdAt: string;
-    user?: { username?: string; full_name?: string } | null;
+    user?: { username?: string; full_name?: string; avatar_url?: string | null } | null;
 };
 
 const mt = (p: PhotoDetail) => (p.mediaType === "video" || p.mimeType?.startsWith("video/") ? "video" : "image");
@@ -433,9 +434,18 @@ function CommentsSection({
                     ) : (
                         comments.map((c) => (
                             <div key={c.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "0.55rem" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
-                                    <strong>{c.user?.full_name || c.user?.username || "User"}</strong>
-                                    <span style={{ color: "var(--muted)" }}>{fd(c.createdAt)}</span>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 6, gap: 8 }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                        <UserAvatar
+                                            src={c.user?.avatar_url}
+                                            name={c.user?.full_name || c.user?.username || "User"}
+                                            size={24}
+                                        />
+                                        <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                            {c.user?.full_name || c.user?.username || "User"}
+                                        </strong>
+                                    </div>
+                                    <span style={{ color: "var(--muted)", flexShrink: 0 }}>{fd(c.createdAt)}</span>
                                 </div>
                                 {editingId === c.id ? (
                                     <div style={{ display: "grid", gap: 6 }}>

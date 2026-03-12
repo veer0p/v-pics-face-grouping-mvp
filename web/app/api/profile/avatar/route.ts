@@ -36,7 +36,8 @@ export async function GET(req: Request) {
 
     initImmich();
     const me = await getMyUser();
-    const blob = await getProfileImage({ id: me.id });
+    const targetUserId = searchParams.get("userId") || me.id;
+    const blob = await getProfileImage({ id: targetUserId });
 
     return new NextResponse(blob, {
       status: 200,
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
   } catch (error) {
     const { status, message } = toImmichError(error);
     if (status === 400 || status === 404) {
-      // Immich can respond 400/404 when no profile image is set.
+      // Immich can respond 400/404 when no profile image is set or user id is invalid.
       return new NextResponse(null, {
         status: 204,
         headers: { "Cache-Control": "private, max-age=60" },

@@ -138,13 +138,18 @@ export default function TrashPage() {
         </button>
         <button className="btn btn-danger btn-sm" onClick={deleteSelectedPermanently} disabled={busy || selected.size === 0}>
           <Trash2 size={14} />
-          Delete Selected
+          Delete Permanently
         </button>
       </div>
 
       {error && (
         <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
-          {error}
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <span>{error}</span>
+            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void loadTrash()}>
+              Retry
+            </button>
+          </div>
         </div>
       )}
 

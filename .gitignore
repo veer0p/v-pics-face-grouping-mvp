@@ -20,3 +20,5 @@ web/package-lock.json
 /.next
 .vercel
 /node_modules
+web/.smoke*
+web/.smoke2*

@@ -186,8 +186,8 @@ export default function LoginPage() {
                         <button
                             type="button"
                             className="btn"
-                            title="Biometric support is planned for phase 2"
-                            onClick={() => alert("Biometric-ready flow is planned for phase 2. Use PIN for now.")}
+                            title="Biometric unlock is not enabled yet"
+                            disabled
                             style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
                         >
                             <Fingerprint size={18} />

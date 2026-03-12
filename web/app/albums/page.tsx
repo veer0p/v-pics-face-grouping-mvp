@@ -85,9 +85,9 @@ export default function AlbumsPage() {
             if (event.key === "Enter") void createAlbum();
           }}
         />
-        <button className="btn btn-primary" onClick={createAlbum} disabled={creating}>
+        <button className="btn btn-primary" onClick={createAlbum} disabled={creating} title={creating ? "Creating album..." : undefined}>
           {creating ? <Loader size={16} className="spin" /> : <Plus size={16} />}
-          Create
+          Create Album
         </button>
       </div>
 

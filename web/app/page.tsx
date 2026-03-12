@@ -189,7 +189,7 @@ export default function HomePage() {
             setHasMore(newPhotos.length === PAGE_SIZE);
         } catch (err) {
             console.error("[Gallery] Fetch error:", err);
-            setError(String(err));
+            setError(err instanceof Error ? err.message : "Failed to fetch photos");
         } finally {
             setLoading(false);
             setLoadingMore(false);
@@ -300,7 +300,7 @@ export default function HomePage() {
 
     const handleDelete = async () => {
         if (selected.size === 0 || deleting) return;
-        if (!confirm(`Are you sure you want to delete ${selected.size} photo(s)?`)) return;
+        if (!confirm(`Move ${selected.size} selected item(s) to Trash?`)) return;
         setDeleting(true);
         try {
             await fetch("/api/photos/delete", {
@@ -452,7 +452,12 @@ export default function HomePage() {
             )}
 
             {error && (
-                <div style={{ padding: "1rem", background: "var(--error-soft)", borderRadius: "var(--r-md)", color: "var(--error)", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", border: "1px solid var(--error)" }}>{error}</div>
+                <div style={{ padding: "1rem", background: "var(--error-soft)", borderRadius: "var(--r-md)", color: "var(--error)", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", border: "1px solid var(--error)", display: "grid", gap: "0.6rem" }}>
+                    <span>{error}</span>
+                    <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void fetchPhotos(0, false, { forceNetwork: true })}>
+                        Retry
+                    </button>
+                </div>
             )}
 
             {!loading && !error && filteredGalleryPhotos.length === 0 && (

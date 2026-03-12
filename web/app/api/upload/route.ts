@@ -54,16 +54,28 @@ export async function POST(req: NextRequest) {
         ? Math.floor(rawDurationNumber)
         : parseDurationMs(durationRaw);
 
+      const createDto: {
+        assetData: File;
+        deviceId: string;
+        deviceAssetId: string;
+        fileCreatedAt: string;
+        fileModifiedAt: string;
+        filename: string;
+        duration?: string;
+      } = {
+        assetData: file,
+        deviceId: "vpics-web",
+        deviceAssetId: buildDeviceAssetId(file),
+        fileCreatedAt,
+        fileModifiedAt,
+        filename: file.name,
+      };
+      if (durationMs && durationMs > 0) {
+        createDto.duration = String(durationMs / 1000);
+      }
+
       const result = await uploadAsset({
-        assetMediaCreateDto: {
-          assetData: file,
-          deviceId: "vpics-web",
-          deviceAssetId: buildDeviceAssetId(file),
-          fileCreatedAt,
-          fileModifiedAt,
-          filename: file.name,
-          duration: durationMs ? String(durationMs / 1000) : undefined,
-        },
+        assetMediaCreateDto: createDto,
       });
 
       const asset = await getImmichAssetById(result.id);

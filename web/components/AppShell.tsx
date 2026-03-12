@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { MatrixBackground } from "@/components/MatrixBackground";
 import { PookieBackground } from "@/components/PookieBackground";
+import { UserAvatar } from "@/components/UserAvatar";
 import { useTheme } from "./ThemeProvider";
 import { ACCENT_PALETTES } from "@/lib/palettes";
 
@@ -90,15 +91,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                 aria-label="Account"
                                 onClick={() => setShowMenu(!showMenu)}
                             >
-                                {user?.avatar_url ? (
-                                    <img
-                                        src={user.avatar_url}
-                                        alt="Profile"
-                                        style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }}
-                                    />
-                                ) : (
-                                    <div className="app-avatar-inner" />
-                                )}
+                                <UserAvatar
+                                    src={user?.avatar_url}
+                                    name={user?.full_name || user?.username || "User"}
+                                    size={34}
+                                    style={{ width: "100%", height: "100%" }}
+                                />
                                 {user && (
                                     <div style={{
                                         position: "absolute",

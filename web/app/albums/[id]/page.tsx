@@ -174,7 +174,12 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
 
       {error && (
         <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
-          {error}
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <span>{error}</span>
+            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void loadAlbum()}>
+              Retry
+            </button>
+          </div>
         </div>
       )}
 
@@ -195,6 +200,9 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
       {photos.length === 0 ? (
         <div className="empty-state" style={{ minHeight: 220 }}>
           <p className="empty-state-title">No media in this album</p>
+          <button className="btn btn-secondary btn-sm" onClick={() => router.push("/")}>
+            Back to Timeline
+          </button>
         </div>
       ) : (
         <div className="responsive-grid">

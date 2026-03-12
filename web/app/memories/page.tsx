@@ -26,6 +26,9 @@ export default function MemoriesPage() {
                     <Sparkles size={28} strokeWidth={2} style={{ display: "inline", verticalAlign: "-5px", marginRight: 8 }} />
                     Memories
                 </h1>
+                <p style={{ marginTop: "0.55rem", color: "var(--muted)", fontSize: "0.9rem" }}>
+                    Curated highlights from your library. Tap any card to open the related moment.
+                </p>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem' }}>

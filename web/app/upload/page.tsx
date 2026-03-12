@@ -210,7 +210,7 @@ export default function UploadPage() {
                         {processing ? "Preparing uploads..." : "Upload Photos & ZIPs"}
                     </p>
                     <p style={{ fontSize: "0.88rem", color: "var(--muted)" }}>
-                        Drag media files here or use the buttons below
+                        {processing ? "Please wait while files are added to queue." : "Drag media files here or use the buttons below"}
                     </p>
                 </div>
 

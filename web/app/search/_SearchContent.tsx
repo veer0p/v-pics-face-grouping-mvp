@@ -131,7 +131,16 @@ export default function SearchContent() {
 
           {error && (
             <div className="panel" style={{ color: "var(--error)", borderColor: "var(--error)" }}>
-              {error}
+              <div style={{ display: "grid", gap: "0.55rem" }}>
+                <span>{error}</span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ width: "fit-content" }}
+                  onClick={() => doSearch(activeQuery)}
+                >
+                  Retry Search
+                </button>
+              </div>
             </div>
           )}
 

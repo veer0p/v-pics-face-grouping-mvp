@@ -387,7 +387,12 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
 
       {error && (
         <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
-          {error}
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <span>{error}</span>
+            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void load()}>
+              Retry
+            </button>
+          </div>
         </div>
       )}
       {hint && (

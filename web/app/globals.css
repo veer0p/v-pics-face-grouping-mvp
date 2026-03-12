@@ -2747,3 +2747,18 @@ img {
         display: none !important;
     }
 }
+
+@media (max-width: 768px) {
+    .btn {
+        min-height: 40px;
+    }
+
+    .chip {
+        min-height: 38px;
+        padding: 0.5rem 0.8rem;
+    }
+
+    .panel {
+        padding: 0.9rem;
+    }
+}

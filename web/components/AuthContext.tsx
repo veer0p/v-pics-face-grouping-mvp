@@ -5,7 +5,7 @@ type UserProfile = {
     id: string;
     full_name: string;
     username?: string;
-    avatar_url?: string;
+    avatar_url?: string | null;
 };
 
 type AuthContextType = {

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, HardDrive, Loader, LogOut, Monitor, Moon, Save, Sun, Trash2, Upload } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAuth } from "@/components/AuthContext";
+import { UserAvatar } from "@/components/UserAvatar";
 
 type StatsResponse = {
   totalPhotos: number;
@@ -21,6 +22,53 @@ type StatsResponse = {
     diskUsagePercentage: number;
   };
 };
+
+const MAX_AVATAR_INPUT_SIZE = 25 * 1024 * 1024;
+const MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024;
+
+async function loadImageElement(file: File): Promise<HTMLImageElement> {
+  const blobUrl = URL.createObjectURL(file);
+  const img = new Image();
+  const loaded = new Promise<HTMLImageElement>((resolve, reject) => {
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Failed to decode selected image"));
+  });
+  img.src = blobUrl;
+  try {
+    return await loaded;
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+async function prepareAvatarFile(file: File): Promise<File> {
+  const source = await loadImageElement(file);
+  const side = Math.min(source.naturalWidth, source.naturalHeight);
+  const sx = Math.max(0, Math.floor((source.naturalWidth - side) / 2));
+  const sy = Math.max(0, Math.floor((source.naturalHeight - side) / 2));
+  const outSize = 512;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = outSize;
+  canvas.height = outSize;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available for avatar processing");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(source, sx, sy, side, side, 0, 0, outSize, outSize);
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (!nextBlob) {
+        reject(new Error("Failed to prepare avatar image"));
+        return;
+      }
+      resolve(nextBlob);
+    }, "image/webp", 0.92);
+  });
+
+  return new File([blob], `avatar-${Date.now()}.webp`, { type: "image/webp" });
+}
 
 function formatBytes(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -113,11 +161,20 @@ export default function SettingsPage() {
       setProfileMessage("Please select an image file.");
       return;
     }
+    if (file.size > MAX_AVATAR_INPUT_SIZE) {
+      setProfileMessage("Selected image is too large. Please choose a file under 25MB.");
+      return;
+    }
     setAvatarUploading(true);
     setProfileMessage(null);
     try {
+      const processedFile = await prepareAvatarFile(file);
+      if (processedFile.size > MAX_AVATAR_UPLOAD_SIZE) {
+        setProfileMessage("Avatar is still too large after compression. Try a smaller image.");
+        return;
+      }
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", processedFile);
       const res = await fetch("/api/profile/avatar", {
         method: "POST",
         body: form,
@@ -143,7 +200,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/profile/avatar", { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to remove profile image"));
-      updateUser({ avatar_url: undefined });
+      updateUser({ avatar_url: null });
       setProfileMessage("Profile photo removed.");
     } catch (err) {
       setProfileMessage(err instanceof Error ? err.message : "Failed to remove profile photo");
@@ -174,17 +231,12 @@ export default function SettingsPage() {
         <div className="settings-main-column">
           <div className="panel settings-account-panel">
             <div className="settings-avatar-wrap">
-              {user?.avatar_url ? (
-                <img
-                  src={user.avatar_url}
-                  alt="Profile"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span style={{ fontSize: "1.6rem", fontWeight: 800, color: "#fff" }}>
-                  {(user?.full_name || "U").slice(0, 1).toUpperCase()}
-                </span>
-              )}
+              <UserAvatar
+                src={user?.avatar_url}
+                name={user?.full_name || user?.username || "User"}
+                size={96}
+                style={{ width: "100%", height: "100%" }}
+              />
               <button
                 type="button"
                 className="settings-avatar-edit"
