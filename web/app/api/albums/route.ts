@@ -1,84 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
-import { getReadUrl } from "@/lib/r2";
+import { createAlbum, getAllAlbums } from "@immich/sdk";
+import { initImmich, toImmichError } from "@/lib/immich-server";
+import { getAuthenticatedProfile } from "@/lib/supabase-server";
 
-/**
- * GET /api/albums
- * List all albums with photo count and cover image.
- */
 export async function GET() {
-    try {
-        const supabase = createServiceClient();
+  try {
+    const user = await getAuthenticatedProfile();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        // Fetch albums with photo counts and cover info
-        // We join albums with album_photos to get counts and first photo as cover
-        const { data: albums, error } = await supabase
-            .from("albums")
-            .select(`
-        *,
-        photos_count: album_photos(count),
-        cover_photo: album_photos(
-          photo: photos(id, original_key, thumb_key)
-        )
-      `)
-            .order("created_at", { ascending: false });
+    initImmich();
+    const albums = await getAllAlbums({ shared: false });
 
-        if (error) {
-            console.error("Albums fetch error:", error);
-            return NextResponse.json({ error: "Database error" }, { status: 500 });
-        }
+    const mapped = (albums || []).map((album) => ({
+      id: album.id,
+      name: album.albumName,
+      count: album.assetCount || 0,
+      coverUrl: album.albumThumbnailAssetId
+        ? `/api/media/${album.albumThumbnailAssetId}/thumbnail`
+        : null,
+      createdAt: album.createdAt,
+    }));
 
-        const processedAlbums = await Promise.all(
-            (albums || []).map(async (album) => {
-                // Find a cover photo. Use the first one associated if exist
-                let coverUrl = null;
-                const firstPhoto = album.cover_photo?.[0]?.photo;
-                if (firstPhoto) {
-                    coverUrl = await getReadUrl(firstPhoto.thumb_key || firstPhoto.original_key);
-                }
-
-                return {
-                    id: album.id,
-                    name: album.name,
-                    count: album.photos_count?.[0]?.count || 0,
-                    coverUrl,
-                    createdAt: album.created_at,
-                };
-            })
-        );
-
-        return NextResponse.json({ albums: processedAlbums });
-    } catch (err) {
-        console.error("Albums error:", err);
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-    }
+    return NextResponse.json({ albums: mapped });
+  } catch (err) {
+    const { status, message } = toImmichError(err);
+    return NextResponse.json({ error: message }, { status });
+  }
 }
 
-/**
- * POST /api/albums
- * Create a new album.
- */
 export async function POST(req: NextRequest) {
-    try {
-        const { name } = await req.json();
-        if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
+  try {
+    const user = await getAuthenticatedProfile();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const supabase = createServiceClient();
-        const { data, error } = await supabase
-            .from("albums")
-            .insert({ name })
-            .select()
-            .single();
+    const body = await req.json();
+    const name = String(body?.name || "").trim();
+    if (!name) return NextResponse.json({ error: "Name is required" }, { status: 400 });
 
-        if (error) {
-            console.error("Album create error:", error);
-            return NextResponse.json({ error: "Database error" }, { status: 500 });
-        }
+    initImmich();
+    const created = await createAlbum({ createAlbumDto: { albumName: name } });
 
-        return NextResponse.json({ album: data });
-    } catch (err) {
-        console.error("Album create error:", err);
-        return NextResponse.json({ error: "Internal error" }, { status: 500 });
-    }
+    return NextResponse.json({
+      album: {
+        id: created.id,
+        name: created.albumName,
+        count: created.assetCount || 0,
+        coverUrl: created.albumThumbnailAssetId
+          ? `/api/media/${created.albumThumbnailAssetId}/thumbnail`
+          : null,
+        createdAt: created.createdAt,
+      },
+    });
+  } catch (err) {
+    const { status, message } = toImmichError(err);
+    return NextResponse.json({ error: message }, { status });
+  }
 }
-

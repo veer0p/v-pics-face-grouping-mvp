@@ -1,344 +1,333 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-    ArrowLeft,
-    HardDrive,
-    Trash2,
-    Palette,
-    Sun,
-    Moon,
-    Monitor,
-    LogOut,
-    ChevronRight,
-    Heart,
-    Camera,
-    Loader,
-} from "lucide-react";
+import { ArrowLeft, Camera, HardDrive, Loader, LogOut, Monitor, Moon, Save, Sun, Trash2, Upload } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
-import { ACCENT_PALETTES } from "@/lib/palettes";
 import { useAuth } from "@/components/AuthContext";
-import { uploadToR2 } from "@/lib/upload-utils";
 
-const STORAGE_CAP_BYTES = 15 * 1024 * 1024 * 1024;
+type StatsResponse = {
+  totalPhotos: number;
+  totalBytes: number;
+  trashCount: number;
+  trashBytes: number;
+  favoriteCount: number;
+  imageCount?: number;
+  videoCount?: number;
+  storage?: {
+    diskSizeRaw: number;
+    diskUseRaw: number;
+    diskAvailableRaw: number;
+    diskUsagePercentage: number;
+  };
+};
 
-type SettingRowProps = { icon: ReactNode; label: string; right?: ReactNode; onClick?: () => void };
-function SettingRow({ icon, label, right, onClick }: SettingRowProps) {
-    const Component = onClick ? "button" : "div";
-    return (
-        <Component
-            className="setting-row"
-            onClick={onClick}
-            type={onClick ? "button" : undefined}
-            style={!onClick ? { cursor: 'default' } : undefined}
-        >
-            <span className="setting-row-icon">{icon}</span>
-            <span className="setting-row-label">{label}</span>
-            <span className="setting-row-right">{right ?? <ChevronRight size={16} color="var(--muted-2)" />}</span>
-        </Component>
-    );
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
-
-function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-type Stats = { totalPhotos: number; totalBytes: number; trashCount: number; trashBytes: number; favoriteCount: number };
 
 export default function SettingsPage() {
-    const router = useRouter();
-    const { user, signOut, updateUser } = useAuth();
-    const { theme, setTheme, resolved, accentIndex, setAccentIndex } = useTheme();
-    const [stats, setStats] = useState<Stats | null>(null);
-    const [savingAvatar, setSavingAvatar] = useState(false);
-    const [avatarError, setAvatarError] = useState<string | null>(null);
-    const avatarInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+  const { user, signOut, updateUser } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState(user?.full_name || "");
+  const [savingName, setSavingName] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
-    useEffect(() => {
-        fetch("/api/stats").then((r) => r.json()).then(setStats).catch(() => { });
-    }, []);
+  useEffect(() => {
+    setNameDraft(user?.full_name || "");
+  }, [user?.full_name]);
 
-    const usedPct = stats ? Math.min((stats.totalBytes / STORAGE_CAP_BYTES) * 100, 100) : 0;
-    const availableBytes = stats ? Math.max(STORAGE_CAP_BYTES - stats.totalBytes, 0) : 0;
-
-    const getInitials = (name?: string) => {
-        const fallback = "U";
-        if (!name?.trim()) return fallback;
-        return name
-            .trim()
-            .split(/\s+/)
-            .slice(0, 2)
-            .map((part) => part[0]?.toUpperCase() || "")
-            .join("") || fallback;
+  useEffect(() => {
+    let cancelled = false;
+    const loadStats = async () => {
+      setStatsLoading(true);
+      setStatsError(null);
+      try {
+        const res = await fetch("/api/stats");
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(String(data?.error || "Failed to load stats"));
+        if (!cancelled) setStats(data);
+      } catch (err) {
+        if (!cancelled) setStatsError(err instanceof Error ? err.message : "Failed to load stats");
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
     };
-
-    const toAvatarBlob = async (file: File): Promise<Blob> => {
-        const size = 320;
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Failed to initialize avatar canvas");
-
-        if (typeof createImageBitmap === "function") {
-            const bitmap = await createImageBitmap(file);
-            const srcSize = Math.min(bitmap.width, bitmap.height);
-            const sx = (bitmap.width - srcSize) / 2;
-            const sy = (bitmap.height - srcSize) / 2;
-            ctx.drawImage(bitmap, sx, sy, srcSize, srcSize, 0, 0, size, size);
-            bitmap.close();
-        } else {
-            const fileUrl = URL.createObjectURL(file);
-            await new Promise<void>((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => {
-                    const srcSize = Math.min(img.naturalWidth, img.naturalHeight);
-                    const sx = (img.naturalWidth - srcSize) / 2;
-                    const sy = (img.naturalHeight - srcSize) / 2;
-                    ctx.drawImage(img, sx, sy, srcSize, srcSize, 0, 0, size, size);
-                    URL.revokeObjectURL(fileUrl);
-                    resolve();
-                };
-                img.onerror = () => {
-                    URL.revokeObjectURL(fileUrl);
-                    reject(new Error("Failed to load image"));
-                };
-                img.src = fileUrl;
-            });
-        }
-
-        const blob = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob(
-                (result) => {
-                    if (result) resolve(result);
-                    else reject(new Error("Failed to export avatar"));
-                },
-                "image/webp",
-                0.85,
-            );
-        });
-
-        return blob;
+    void loadStats();
+    return () => {
+      cancelled = true;
     };
+  }, []);
 
-    const handleAvatarChange = async (event: ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
+  const saveName = async () => {
+    if (savingName) return;
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      setProfileMessage("Name cannot be empty.");
+      return;
+    }
+    if (trimmed === (user?.full_name || "").trim()) {
+      setProfileMessage("Name is already up to date.");
+      return;
+    }
 
-        try {
-            setSavingAvatar(true);
-            setAvatarError(null);
+    setSavingName(true);
+    setProfileMessage(null);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fullName: trimmed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to update profile"));
+      if (data?.user?.full_name) {
+        updateUser({ full_name: data.user.full_name });
+        setNameDraft(data.user.full_name);
+        setProfileMessage("Profile name updated.");
+      }
+    } catch (err) {
+      setProfileMessage(err instanceof Error ? err.message : "Failed to update profile");
+    } finally {
+      setSavingName(false);
+    }
+  };
 
-            if (!file.type.startsWith("image/")) {
-                throw new Error("Please select a valid image file.");
-            }
+  const uploadAvatar = async (file: File) => {
+    if (avatarUploading) return;
+    if (!file.type.startsWith("image/")) {
+      setProfileMessage("Please select an image file.");
+      return;
+    }
+    setAvatarUploading(true);
+    setProfileMessage(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/profile/avatar", {
+        method: "POST",
+        body: form,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to upload profile image"));
+      if (data?.user?.avatar_url) {
+        updateUser({ avatar_url: data.user.avatar_url });
+      }
+      setProfileMessage("Profile photo updated.");
+    } catch (err) {
+      setProfileMessage(err instanceof Error ? err.message : "Failed to upload profile photo");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
-            const avatarBlob = await toAvatarBlob(file);
-            const avatarFile = new File([avatarBlob], "avatar.webp", { type: "image/webp" });
+  const removeAvatar = async () => {
+    if (avatarUploading) return;
+    setAvatarUploading(true);
+    setProfileMessage(null);
+    try {
+      const res = await fetch("/api/profile/avatar", { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to remove profile image"));
+      updateUser({ avatar_url: undefined });
+      setProfileMessage("Profile photo removed.");
+    } catch (err) {
+      setProfileMessage(err instanceof Error ? err.message : "Failed to remove profile photo");
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
-            const presignRes = await fetch("/api/profile/avatar/presign", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contentType: avatarFile.type }),
-            });
-            const presignData = await presignRes.json();
-            if (!presignRes.ok) {
-                throw new Error(presignData?.error || "Failed to initialize avatar upload.");
-            }
+  return (
+    <div className="page-shell settings-shell">
+      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.2rem" }}>
+        <button className="btn btn-icon btn-secondary mobile-only" onClick={() => router.back()} aria-label="Back">
+          <ArrowLeft size={18} strokeWidth={2} />
+        </button>
+        <h1
+          style={{
+            fontFamily: "var(--font-display)",
+            fontStyle: "italic",
+            fontSize: "clamp(1.5rem, 4vw, 2rem)",
+            fontWeight: 700,
+          }}
+        >
+          Settings
+        </h1>
+      </div>
 
-            await uploadToR2(avatarFile, String(presignData.uploadUrl), () => { });
-            const res = await fetch("/api/profile", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ avatarKey: presignData.avatarKey }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-                throw new Error(data.error || "Failed to save profile picture.");
-            }
-
-            updateUser({ avatar_url: data.user?.avatar_url });
-        } catch (err) {
-            const message = err instanceof Error ? err.message : "Failed to update profile picture.";
-            setAvatarError(message);
-        } finally {
-            setSavingAvatar(false);
-            event.target.value = "";
-        }
-    };
-
-    return (
-        <div className="page-shell settings-shell">
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2.5rem" }}>
-                <button className="btn btn-icon btn-secondary mobile-only" onClick={() => router.back()} aria-label="Back">
-                    <ArrowLeft size={18} strokeWidth={2} />
+      <div className="settings-layout">
+        <div className="settings-main-column">
+          <div className="panel settings-account-panel">
+            <div className="settings-avatar-wrap">
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt="Profile"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+              ) : (
+                <span style={{ fontSize: "1.6rem", fontWeight: 800, color: "#fff" }}>
+                  {(user?.full_name || "U").slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <button
+                type="button"
+                className="settings-avatar-edit"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarUploading}
+                aria-label="Change profile picture"
+              >
+                {avatarUploading ? <Loader size={12} className="spin" /> : <Camera size={12} />}
+              </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(event) => {
+                  const next = event.target.files?.[0];
+                  if (next) void uploadAvatar(next);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </div>
+            <div style={{ flex: 1, display: "grid", gap: "0.45rem" }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
+                Profile
+              </p>
+              <input className="input" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
+              <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading}>
+                  <Upload size={14} />
+                  Change Photo
                 </button>
-                <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "clamp(1.5rem, 4vw, 2rem)", fontWeight: 700 }}>
-                    Settings
-                </h1>
+                <button className="btn btn-ghost btn-sm" onClick={removeAvatar} disabled={avatarUploading || !user?.avatar_url}>
+                  Remove Photo
+                </button>
+              </div>
+              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
+                Username/PIN login remains managed in Supabase auth tables.
+              </p>
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={saveName} disabled={savingName}>
+              {savingName ? <Loader size={14} className="spin" /> : <Save size={14} />}
+              Save
+            </button>
+          </div>
+
+          {profileMessage && (
+            <div className="panel" style={{ borderColor: "var(--line)", color: "var(--ink-2)" }}>
+              {profileMessage}
+            </div>
+          )}
+
+          <div className="panel">
+            <p className="section-heading" style={{ marginBottom: "0.85rem" }}>Theme</p>
+            <div className="theme-selector">
+              <button
+                className={`theme-selector-btn${theme === "light" ? " active" : ""}`}
+                onClick={() => setTheme("light")}
+              >
+                <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Light
+              </button>
+              <button
+                className={`theme-selector-btn${theme === "system" ? " active" : ""}`}
+                onClick={() => setTheme("system")}
+              >
+                <Monitor size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> System
+              </button>
+              <button
+                className={`theme-selector-btn${theme === "dark" ? " active" : ""}`}
+                onClick={() => setTheme("dark")}
+              >
+                <Moon size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Dark
+              </button>
+            </div>
+          </div>
+
+          {statsError && (
+            <div className="panel" style={{ borderColor: "var(--error)", color: "var(--error)" }}>
+              {statsError}
+            </div>
+          )}
+
+          <div className="panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+              <p className="section-heading">Library Stats</p>
+              {statsLoading && <Loader size={14} className="spin" color="var(--accent)" />}
+            </div>
+            <div className="stats-row">
+              <div className="stat-card">
+                <div className="stat-card-value">{stats?.totalPhotos || 0}</div>
+                <div className="stat-card-label">Assets</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-card-value">{stats?.favoriteCount || 0}</div>
+                <div className="stat-card-label">Favorites</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-card-value">{stats?.trashCount || 0}</div>
+                <div className="stat-card-label">In Trash</div>
+              </div>
             </div>
 
-            <div className="settings-layout">
-                <div className="settings-main-column">
-                    <div className="panel settings-account-panel">
-                        <div className="settings-avatar-wrap">
-                            {user?.avatar_url ? (
-                                <img
-                                    src={user.avatar_url}
-                                    alt="Profile"
-                                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                                />
-                            ) : (
-                                <span style={{ fontSize: "1.1rem", fontWeight: 700, color: "#fff" }}>
-                                    {getInitials(user?.full_name)}
-                                </span>
-                            )}
-                            <button
-                                type="button"
-                                className="settings-avatar-edit"
-                                onClick={() => avatarInputRef.current?.click()}
-                                disabled={savingAvatar}
-                                aria-label="Change profile picture"
-                            >
-                                {savingAvatar ? <Loader size={14} className="spin" /> : <Camera size={14} />}
-                            </button>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontWeight: 700, fontSize: "1.1rem" }}>{user?.full_name || "Guest User"}</p>
-                            <p style={{ fontSize: "0.85rem", color: "var(--muted)" }}>
-                                {stats ? `${stats.totalPhotos} photos • ${stats.favoriteCount} favorites` : "Loading…"}
-                            </p>
-                            <div style={{ marginTop: "0.6rem", height: 8, borderRadius: 4, background: "var(--bg-subtle)", overflow: "hidden" }}>
-                                <div style={{
-                                    height: "100%", width: `${usedPct}%`, borderRadius: 4,
-                                    background: "linear-gradient(90deg, var(--accent), var(--accent-2))",
-                                    transition: "width 500ms ease",
-                                }} />
-                            </div>
-                            <p style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "0.3rem" }}>
-                                {stats ? `${formatBytes(stats.totalBytes)} used • ${formatBytes(availableBytes)} available` : "—"}
-                            </p>
-                        </div>
-                        <input
-                            ref={avatarInputRef}
-                            type="file"
-                            accept="image/*"
-                            hidden
-                            onChange={handleAvatarChange}
-                        />
-                    </div>
-                    {avatarError && (
-                        <p style={{ marginTop: "0.65rem", color: "var(--error)", fontSize: "0.8rem" }}>{avatarError}</p>
-                    )}
-
-                    <div className="settings-storage-chips">
-                        <div className="settings-storage-chip">
-                            <span className="settings-storage-chip-label">Used</span>
-                            <span className="settings-storage-chip-value">{stats ? formatBytes(stats.totalBytes) : "—"}</span>
-                        </div>
-                        <div className="settings-storage-chip">
-                            <span className="settings-storage-chip-label">Available</span>
-                            <span className="settings-storage-chip-value">{stats ? formatBytes(availableBytes) : "—"}</span>
-                        </div>
-                        <div className="settings-storage-chip">
-                            <span className="settings-storage-chip-label">Capacity</span>
-                            <span className="settings-storage-chip-value">{formatBytes(STORAGE_CAP_BYTES)}</span>
-                        </div>
-                    </div>
-
-                    <div>
-                        <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Storage</p>
-                        <div className="settings-group">
-                            <SettingRow icon={<HardDrive size={18} />} label="Total photos"
-                                right={<span className="setting-value">{stats?.totalPhotos ?? "—"}</span>} />
-                            <SettingRow icon={<Heart size={18} />} label="Favorites"
-                                right={<span className="setting-value">{stats?.favoriteCount ?? "—"}</span>} />
-                            <SettingRow icon={<Trash2 size={18} />} label="Trash"
-                                right={<span className="setting-value">{stats ? `${stats.trashCount} (${formatBytes(stats.trashBytes)})` : "—"}</span>}
-                                onClick={() => router.push("/trash")} />
-                            <SettingRow icon={<HardDrive size={18} />} label="Used space"
-                                right={<span className="setting-value">{stats ? formatBytes(stats.totalBytes) : "—"}</span>} />
-                            <SettingRow icon={<HardDrive size={18} />} label="Available space"
-                                right={<span className="setting-value">{stats ? formatBytes(availableBytes) : "—"}</span>} />
-                            <SettingRow icon={<HardDrive size={18} />} label="Storage capacity"
-                                right={<span className="setting-value">{formatBytes(STORAGE_CAP_BYTES)}</span>} />
-                        </div>
-                    </div>
-
-                    <div>
-                        <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Appearance</p>
-                        <div className="settings-group">
-                            <div style={{ padding: "1rem" }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.85rem" }}>
-                                    <Sun size={18} color="var(--muted)" />
-                                    <span style={{ fontWeight: 500, fontSize: "0.95rem" }}>Theme</span>
-                                </div>
-                                <div className="theme-selector">
-                                    <button className={`theme-selector-btn${theme === "light" ? " active" : ""}`}
-                                        onClick={() => setTheme("light")}>
-                                        <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Light
-                                    </button>
-                                    <button className={`theme-selector-btn${theme === "system" ? " active" : ""}`}
-                                        onClick={() => setTheme("system")}>
-                                        <Monitor size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> System
-                                    </button>
-                                    <button className={`theme-selector-btn${theme === "dark" ? " active" : ""}`}
-                                        onClick={() => setTheme("dark")}>
-                                        <Moon size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Dark
-                                    </button>
-                                </div>
-                            </div>
-                            <div style={{ padding: "1rem", paddingTop: 0 }}>
-                                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.85rem" }}>
-                                    <Palette size={18} color="var(--muted)" />
-                                    <span style={{ fontWeight: 500, fontSize: "0.95rem" }}>Accent Color</span>
-                                </div>
-                                <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", padding: "4px" }}>
-                                    {ACCENT_PALETTES[resolved].map((palette, i) => (
-                                        <button
-                                            key={palette.name}
-                                            onClick={() => setAccentIndex(i)}
-                                            title={palette.name}
-                                            style={{
-                                                width: 32, height: 32, borderRadius: "50%",
-                                                background: palette.accent,
-                                                border: accentIndex === i ? "3px solid #fff" : "none",
-                                                boxShadow: accentIndex === i ? `0 0 12px ${palette.accent}` : "none",
-                                                cursor: "pointer",
-                                                transition: "all 150ms ease",
-                                                padding: 0
-                                            }}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="settings-side-column">
-                    <div className="panel" style={{ padding: "1.25rem" }}>
-                        <p className="section-heading" style={{ marginBottom: "0.65rem" }}>Account</p>
-                        <div style={{ fontSize: "0.92rem", color: "var(--ink-2)", lineHeight: 1.6 }}>
-                            Signed in as <strong>{user?.full_name || "Guest User"}</strong>.
-                        </div>
-                    </div>
-
-                    <button className="btn btn-danger" style={{ width: "100%", marginTop: "0.5rem", padding: '1rem' }}
-                        onClick={async () => {
-                            await signOut();
-                            router.replace("/login");
-                        }}>
-                        <LogOut size={18} strokeWidth={2} /> Sign Out
-                    </button>
-                </div>
+            <div className="settings-storage-chips">
+              <div className="settings-storage-chip">
+                <span className="settings-storage-chip-label">Library Usage</span>
+                <span className="settings-storage-chip-value">{formatBytes(Number(stats?.totalBytes || 0))}</span>
+              </div>
+              <div className="settings-storage-chip">
+                <span className="settings-storage-chip-label">Trash Size</span>
+                <span className="settings-storage-chip-value">{formatBytes(Number(stats?.trashBytes || 0))}</span>
+              </div>
+              <div className="settings-storage-chip">
+                <span className="settings-storage-chip-label">Disk Used</span>
+                <span className="settings-storage-chip-value">{formatBytes(Number(stats?.storage?.diskUseRaw || 0))}</span>
+              </div>
             </div>
+          </div>
         </div>
-    );
+
+        <div className="settings-side-column">
+          <div className="panel">
+            <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Maintenance</p>
+            <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "flex-start", marginBottom: "0.6rem" }} onClick={() => router.push("/trash")}>
+              <Trash2 size={16} />
+              Open Trash Manager
+            </button>
+            <div style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.5, display: "flex", gap: "0.4rem", alignItems: "center" }}>
+              <HardDrive size={13} />
+              Trash and storage now map to Immich directly.
+            </div>
+          </div>
+
+          <button
+            className="btn btn-danger"
+            style={{ width: "100%", padding: "1rem" }}
+            onClick={async () => {
+              await signOut();
+              router.replace("/login");
+            }}
+          >
+            <LogOut size={18} strokeWidth={2} /> Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

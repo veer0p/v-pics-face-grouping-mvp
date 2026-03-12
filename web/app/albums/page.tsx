@@ -1,144 +1,139 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Image, Loader, RefreshCw, FolderPlus } from "lucide-react";
+import { FolderOpen, Loader, Plus } from "lucide-react";
 
-type Album = {
-    id: string;
-    name: string;
-    count: number;
-    coverUrl: string | null;
-    createdAt: string;
+type AlbumItem = {
+  id: string;
+  name: string;
+  count: number;
+  coverUrl: string | null;
+  createdAt: string;
 };
 
 export default function AlbumsPage() {
-    const router = useRouter();
-    const [albums, setAlbums] = useState<Album[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [creating, setCreating] = useState(false);
+  const router = useRouter();
+  const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-    const fetchAlbums = async () => {
-        setLoading(true);
-        try {
-            const res = await fetch("/api/albums");
-            const data = await res.json();
-            setAlbums(data.albums || []);
-        } catch (err) {
-            console.error("Fetch albums error:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
+  const loadAlbums = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/albums");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to load albums"));
+      setAlbums(Array.isArray(data?.albums) ? data.albums : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load albums");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-    useEffect(() => { fetchAlbums(); }, []);
+  useEffect(() => {
+    void loadAlbums();
+  }, [loadAlbums]);
 
-    const handleCreateAlbum = async () => {
-        const name = prompt("Enter album name:");
-        if (!name?.trim()) return;
+  const createAlbum = async () => {
+    if (creating) return;
+    const trimmed = name.trim();
+    const finalName = trimmed || `Album ${new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
 
-        setCreating(true);
-        try {
-            const res = await fetch("/api/albums", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name.trim() }),
-            });
-            if (res.ok) {
-                const data = await res.json();
-                router.push(`/albums/${data.album.id}`);
-            }
-        } catch (err) {
-            console.error("Create album error:", err);
-        } finally {
-            setCreating(false);
-        }
-    };
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: finalName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to create album"));
+      setName("");
+      await loadAlbums();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create album");
+    } finally {
+      setCreating(false);
+    }
+  };
 
-    return (
-        <div className="page-shell">
-            <div style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                marginBottom: "1.25rem",
-            }}>
-                <div>
-                    <h1 style={{
-                        fontFamily: "var(--font-display)", fontStyle: "italic",
-                        fontSize: "1.75rem", fontWeight: 700,
-                    }}>
-                        Albums
-                    </h1>
-                    <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginTop: "0.15rem" }}>
-                        Manage your collections
-                    </p>
-                </div>
-                <button className="app-header-btn" onClick={fetchAlbums} disabled={loading}>
-                    <RefreshCw size={18} className={loading && !creating ? "spin" : ""} />
-                </button>
-            </div>
+  return (
+    <div className="page-shell">
+      <div style={{ marginBottom: "1.25rem" }}>
+        <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.75rem", fontWeight: 700 }}>
+          Albums
+        </h1>
+        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: "0.25rem" }}>
+          Immich-backed albums
+        </p>
+      </div>
 
-            {loading && albums.length === 0 && (
-                <div style={{ display: "flex", justifyContent: "center", padding: "4rem 0" }}>
-                    <Loader size={28} className="spin" color="var(--accent)" />
-                </div>
-            )}
+      <div className="panel" style={{ marginBottom: "1rem", display: "flex", gap: "0.6rem", alignItems: "center" }}>
+        <input
+          className="input"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Album name (optional)"
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void createAlbum();
+          }}
+        />
+        <button className="btn btn-primary" onClick={createAlbum} disabled={creating}>
+          {creating ? <Loader size={16} className="spin" /> : <Plus size={16} />}
+          Create
+        </button>
+      </div>
 
-            {!loading && albums.length === 0 && (
-                <div className="empty-state" style={{ minHeight: 300 }}>
-                    <div style={{
-                        width: 64, height: 64, borderRadius: "var(--r-lg)",
-                        background: "var(--bg-subtle)", display: "flex",
-                        alignItems: "center", justifyContent: "center", marginBottom: "0.5rem",
-                    }}>
-                        <FolderPlus size={28} color="var(--muted)" strokeWidth={1.5} />
-                    </div>
-                    <p className="empty-state-title">No albums yet</p>
-                    <p className="empty-state-sub">Create an album to organize your photos.</p>
-                    <button className="btn btn-primary" onClick={handleCreateAlbum}
-                        disabled={creating} style={{ marginTop: "1rem", gap: "0.4rem" }}>
-                        {creating ? <Loader size={16} className="spin" /> : <Plus size={16} />}
-                        New Album
-                    </button>
-                </div>
-            )}
-
-            {albums.length > 0 && (
-                <div className="responsive-grid" style={{ gap: '1rem' }}>
-                    {/* Create New Card */}
-                    <div className="album-card" onClick={handleCreateAlbum} style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: '0.75rem' }}>
-                        <div className="album-cover-placeholder"
-                            style={{ background: "var(--accent-soft)", color: "var(--accent)", aspectRatio: '1', borderRadius: 'var(--r-md)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            {creating ? <Loader size={32} className="spin" /> : <Plus size={32} strokeWidth={2.5} />}
-                        </div>
-                        <div className="album-info">
-                            <p className="album-name" style={{ color: "var(--accent)", fontWeight: 700 }}>New Album</p>
-                            <p className="album-count">Create a collection</p>
-                        </div>
-                    </div>
-
-                    {/* Real Albums */}
-                    {albums.map((album) => (
-                        <div className="album-card" key={album.id}
-                            style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: '0.75rem' }}
-                            onClick={() => router.push(`/albums/${album.id}`)}>
-                            <div className="album-cover-placeholder" style={{ background: "var(--bg-subtle)", position: "relative", aspectRatio: '1', borderRadius: 'var(--r-md)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                {album.coverUrl ? (
-                                    <img src={album.coverUrl} alt={album.name} style={{
-                                        width: "100%", height: "100%", objectFit: "cover",
-                                    }} />
-                                ) : (
-                                    <Image size={32} strokeWidth={1.5} color="var(--muted)" />
-                                )}
-                            </div>
-                            <div className="album-info">
-                                <p className="album-name" style={{ fontWeight: 700 }}>{album.name}</p>
-                                <p className="album-count">{album.count} photos</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+      {error && (
+        <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
+          {error}
         </div>
-    );
+      )}
+
+      {loading ? (
+        <div className="empty-state" style={{ minHeight: 220 }}>
+          <Loader size={28} className="spin" color="var(--accent)" />
+        </div>
+      ) : albums.length === 0 ? (
+        <div className="panel" style={{ minHeight: 220, display: "grid", placeItems: "center", textAlign: "center" }}>
+          <div style={{ display: "grid", gap: "0.5rem", justifyItems: "center" }}>
+            <FolderOpen size={30} color="var(--muted)" />
+            <p style={{ fontWeight: 700 }}>No albums yet</p>
+            <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>Create one and start grouping your media.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="albums-grid">
+          {albums.map((album) => (
+            <button
+              key={album.id}
+              type="button"
+              className="album-card"
+              onClick={() => router.push(`/albums/${album.id}`)}
+              style={{ padding: 0, border: "none", textAlign: "left" }}
+            >
+              {album.coverUrl ? (
+                <img src={album.coverUrl} alt={album.name} className="album-cover" />
+              ) : (
+                <div className="album-cover-placeholder">
+                  <FolderOpen size={28} color="var(--muted)" />
+                </div>
+              )}
+              <div className="album-info">
+                <p className="album-name">{album.name}</p>
+                <p className="album-count">{album.count} items</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

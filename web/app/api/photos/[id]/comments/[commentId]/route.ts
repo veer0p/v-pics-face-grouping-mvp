@@ -1,5 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
+import { AssetTypeEnum } from "@immich/sdk";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
+import { getImmichAssetById, parseDurationMs } from "@/lib/immich-server";
+
+type ServiceClient = ReturnType<typeof createServiceClient>;
+
+async function ensurePhotoShadow(supabase: ServiceClient, photoId: string, userId: string) {
+    const asset = await getImmichAssetById(photoId).catch(() => null);
+    if (!asset) return false;
+
+    const { error } = await supabase
+        .from("photos")
+        .upsert(
+            {
+                id: asset.id,
+                original_key: `immich:${asset.id}`,
+                original_name: asset.originalFileName || asset.id,
+                mime_type: asset.originalMimeType || (asset.type === AssetTypeEnum.Video ? "video/mp4" : "image/jpeg"),
+                size_bytes: Number(asset.exifInfo?.fileSizeInByte || 0),
+                created_at: asset.createdAt,
+                taken_at: asset.exifInfo?.dateTimeOriginal || null,
+                media_type: asset.type === AssetTypeEnum.Video ? "video" : "image",
+                duration_ms: parseDurationMs(asset.duration),
+                is_deleted: !!asset.isTrashed,
+                user_id: userId,
+            },
+            { onConflict: "id" },
+        )
+        .select("id")
+        .single();
+
+    if (error) {
+        console.error("[COMMENTS] failed syncing photo shadow:", error);
+        return false;
+    }
+
+    return !asset.isTrashed;
+}
 
 export async function PATCH(
     req: NextRequest,
@@ -27,14 +64,8 @@ export async function PATCH(
             return NextResponse.json({ error: "Comment not found" }, { status: 404 });
         }
 
-        const { data: photo } = await supabase
-            .from("photos")
-            .select("id")
-            .eq("id", photoId)
-            .eq("is_deleted", false)
-            .single();
-
-        if (!photo) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
+        const allowed = await ensurePhotoShadow(supabase, photoId, user.id);
+        if (!allowed) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
         if (comment.user_id !== user.id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
         const { data: updated, error } = await supabase
@@ -90,14 +121,8 @@ export async function DELETE(
             return NextResponse.json({ error: "Comment not found" }, { status: 404 });
         }
 
-        const { data: photo } = await supabase
-            .from("photos")
-            .select("id")
-            .eq("id", photoId)
-            .eq("is_deleted", false)
-            .single();
-
-        if (!photo) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
+        const allowed = await ensurePhotoShadow(supabase, photoId, user.id);
+        if (!allowed) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
         if (comment.user_id !== user.id) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
         const { error } = await supabase

@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
+import { updateAsset } from "@immich/sdk";
+import { initImmich, toImmichError } from "@/lib/immich-server";
+import { getAuthenticatedProfile } from "@/lib/supabase-server";
 
-// Toggle liked
 export async function POST(req: NextRequest) {
-    try {
-        const user = await getAuthenticatedProfile();
-        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const user = await getAuthenticatedProfile();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const { id, liked } = await req.json();
-        if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    const { id, liked } = await req.json();
+    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-        const supabase = createServiceClient();
+    initImmich();
+    await updateAsset({ id: String(id), updateAssetDto: { isFavorite: !!liked } });
 
-        const { error } = await supabase
-            .from("photos")
-            .update({ is_liked: !!liked })
-            .eq("id", id);
-
-        if (error) return NextResponse.json({ error: "DB error" }, { status: 500 });
-        return NextResponse.json({ ok: true });
-    } catch {
-        return NextResponse.json({ error: "Internal error" }, { status: 500 });
-    }
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    const { status, message } = toImmichError(err);
+    return NextResponse.json({ error: message }, { status });
+  }
 }

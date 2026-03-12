@@ -1,15 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addAssetsToAlbum } from "@immich/sdk";
+import { removeAssetFromAlbum } from "@immich/sdk";
 import { getAuthenticatedProfile } from "@/lib/supabase-server";
 import { initImmich, toImmichError } from "@/lib/immich-server";
 
-/**
- * POST /api/albums/[id]/add
- * Add photos to an album.
- */
 export async function POST(
-    req: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const user = await getAuthenticatedProfile();
@@ -24,9 +20,9 @@ export async function POST(
     }
 
     initImmich();
-    await addAssetsToAlbum({ id: albumId, bulkIdsDto: { ids: photoIds } });
+    await removeAssetFromAlbum({ id: albumId, bulkIdsDto: { ids: photoIds } });
 
-    return NextResponse.json({ ok: true, added: photoIds.length });
+    return NextResponse.json({ ok: true, removed: photoIds.length });
   } catch (err) {
     const { status, message } = toImmichError(err);
     return NextResponse.json({ error: message }, { status });

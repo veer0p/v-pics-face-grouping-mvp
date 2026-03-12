@@ -4,9 +4,8 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-    Image, Loader, RefreshCw, Trash2, X, Check, Heart, FolderPlus, Plus, CloudCheck, Play,
+    FolderPlus, Loader, RefreshCw, Trash2, X, Check, Heart, CloudCheck, Play,
 } from "lucide-react";
-import { useRealtimePhotos } from "@/lib/useRealtimePhotos";
 import { PhotoMetadataCache, VideoBlobCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
 import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
@@ -38,6 +37,12 @@ type LocalGalleryPhoto = {
 type ServerGalleryPhoto = Photo & { kind: "server" };
 type GalleryPhoto = ServerGalleryPhoto | LocalGalleryPhoto;
 
+type AlbumPickerItem = {
+    id: string;
+    name: string;
+    count: number;
+};
+
 function mediaTypeOf(photo: { mediaType?: string; mimeType?: string }) {
     if (photo.mediaType === "video") return "video";
     if (String(photo.mimeType || "").startsWith("video/")) return "video";
@@ -55,7 +60,7 @@ function formatDuration(durationMs: number | null | undefined) {
 export default function HomePage() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { pendingItems, retry, remove, reconcileWithServerPhotos } = useUploadQueue();
+    const { pendingItems, reconcileWithServerPhotos } = useUploadQueue();
     const { isOnline } = useNetwork();
     const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
     const forceFreshLoad = searchParams.get("fresh") === "1";
@@ -68,9 +73,10 @@ export default function HomePage() {
     const [error, setError] = useState<string | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [deleting, setDeleting] = useState(false);
-    const [showAlbumPicker, setShowAlbumPicker] = useState(false);
-    const [albums, setAlbums] = useState<{ id: string, name: string }[]>([]);
-    const [addingToAlbum, setAddingToAlbum] = useState<string | null>(null);
+    const [albumPickerOpen, setAlbumPickerOpen] = useState(false);
+    const [albumPickerLoading, setAlbumPickerLoading] = useState(false);
+    const [addingToAlbum, setAddingToAlbum] = useState(false);
+    const [albums, setAlbums] = useState<AlbumPickerItem[]>([]);
 
     const pullStart = useRef(0);
     const [pullOffset, setPullOffset] = useState(0);
@@ -96,7 +102,8 @@ export default function HomePage() {
             if (navigator.vibrate) navigator.vibrate(30);
             setSelected((prev) => {
                 const next = new Set(prev);
-                next.has(photoId) ? next.delete(photoId) : next.add(photoId);
+                if (next.has(photoId)) next.delete(photoId);
+                else next.add(photoId);
                 return next;
             });
         }, 500);
@@ -105,9 +112,6 @@ export default function HomePage() {
     const cancelLongPress = useCallback(() => {
         clearLongPress();
     }, [clearLongPress]);
-
-    // Realtime subscription
-    useRealtimePhotos({ setPhotos, enabled: !loading });
 
     const fetchPhotos = useCallback(async (
         offset = 0,
@@ -217,7 +221,7 @@ export default function HomePage() {
             void fetchPhotos(0, false, { forceNetwork: true });
         }, 3000);
         return () => window.clearInterval(timer);
-    }, [uploadedPendingCount, fetchPhotos]);
+    }, [uploadedPendingCount, fetchPhotos, isOnline]);
 
     useEffect(() => {
         if (!forceFreshLoad) return;
@@ -275,7 +279,8 @@ export default function HomePage() {
     const toggleSelect = (id: string) => {
         setSelected((prev) => {
             const next = new Set(prev);
-            next.has(id) ? next.delete(id) : next.add(id);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
             return next;
         });
     };
@@ -312,53 +317,41 @@ export default function HomePage() {
         }
     };
 
-    const handleOpenAlbumPicker = async () => {
-        setShowAlbumPicker(true);
+    const openAlbumPicker = async () => {
+        if (selected.size === 0 || albumPickerLoading) return;
+        setAlbumPickerOpen(true);
+        setAlbumPickerLoading(true);
         try {
             const res = await fetch("/api/albums");
-            const data = await res.json();
-            setAlbums(data.albums || []);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(String(data?.error || "Failed to load albums"));
+            const mapped = Array.isArray(data?.albums) ? data.albums : [];
+            setAlbums(mapped);
         } catch (err) {
-            console.error(err);
+            console.error("[ALBUM_PICKER] load failed:", err);
+        } finally {
+            setAlbumPickerLoading(false);
         }
     };
 
-    const handleAddToAlbum = async (albumId: string) => {
-        if (selected.size === 0 || addingToAlbum) return;
-        setAddingToAlbum(albumId);
+    const addSelectedToAlbum = async (albumId: string) => {
+        const photoIds = Array.from(selected);
+        if (photoIds.length === 0 || addingToAlbum) return;
+        setAddingToAlbum(true);
         try {
-            await fetch(`/api/albums/${albumId}/add`, {
+            const res = await fetch(`/api/albums/${albumId}/add`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ photoIds: Array.from(selected) }),
+                body: JSON.stringify({ photoIds }),
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(String(data?.error || "Failed to add to album"));
             setSelected(new Set());
-            setShowAlbumPicker(false);
+            setAlbumPickerOpen(false);
         } catch (err) {
-            console.error(err);
+            console.error("[ALBUM_PICKER] add failed:", err);
         } finally {
-            setAddingToAlbum(null);
-        }
-    };
-
-    const handleCreateAndAdd = async () => {
-        const name = prompt("Enter new album name:");
-        if (!name?.trim()) return;
-        setAddingToAlbum("new");
-        try {
-            const res = await fetch("/api/albums", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: name.trim() }),
-            });
-            const data = await res.json();
-            if (data.album?.id) {
-                await handleAddToAlbum(data.album.id);
-            }
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setAddingToAlbum(null);
+            setAddingToAlbum(false);
         }
     };
 
@@ -434,10 +427,6 @@ export default function HomePage() {
         if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
         const options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined };
         return date.toLocaleDateString(undefined, options);
-    }
-
-    function getLocalStatusLabel(_photo: LocalGalleryPhoto) {
-        return "";
     }
 
     return (
@@ -684,8 +673,9 @@ export default function HomePage() {
                             <span style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--ink)" }}>{selected.size} selected</span>
                         </div>
                         <div style={{ display: "flex", gap: "0.5rem" }}>
-                            <button className="btn btn-sm" style={{ background: "var(--accent-soft)", color: "var(--accent)", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleOpenAlbumPicker}>
-                                <FolderPlus size={14} /> Album
+                            <button className="btn btn-sm btn-secondary" onClick={openAlbumPicker} disabled={deleting}>
+                                <FolderPlus size={14} />
+                                Add to Album
                             </button>
                             <button className="btn btn-sm" style={{ background: "var(--error)", color: "#fff", gap: "0.35rem", border: "none", fontWeight: 700 }} onClick={handleDelete} disabled={deleting}>
                                 {deleting ? <Loader size={14} className="spin" /> : <Trash2 size={14} />}
@@ -696,37 +686,54 @@ export default function HomePage() {
                 )
             }
 
-            {
-                showAlbumPicker && (
-                    <div style={{
-                        position: "fixed", inset: 0, zIndex: 100,
-                        background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
-                        display: "flex", alignItems: "flex-end",
-                    }}>
-                        <div style={{ position: "absolute", inset: 0 }} onClick={() => setShowAlbumPicker(false)} />
-                        <div style={{
-                            position: "relative", width: "100%", background: "var(--bg-elevated)",
-                            borderRadius: "1.25rem 1.25rem 0 0", padding: "1.25rem",
-                            paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))",
-                            boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
-                        }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "1rem" }}>
-                                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>Add to collection</h3>
-                                <button onClick={() => setShowAlbumPicker(false)} style={{ border: "none", background: "none", color: "var(--muted)" }}><X size={20} /></button>
+            {albumPickerOpen && (
+                <div style={{
+                    position: "fixed",
+                    inset: 0,
+                    background: "rgba(0,0,0,0.45)",
+                    zIndex: 80,
+                    display: "grid",
+                    placeItems: "center",
+                    padding: "1rem",
+                }} onClick={() => !addingToAlbum && setAlbumPickerOpen(false)}>
+                    <div className="panel" style={{ width: "min(460px, 100%)", maxHeight: "70vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
+                            <p className="section-heading">Add {selected.size} item(s) to album</p>
+                            <button className="btn btn-ghost btn-sm" onClick={() => setAlbumPickerOpen(false)} disabled={addingToAlbum}>
+                                <X size={14} />
+                            </button>
+                        </div>
+
+                        {albumPickerLoading ? (
+                            <div className="empty-state" style={{ minHeight: 140 }}>
+                                <Loader size={22} className="spin" color="var(--accent)" />
                             </div>
-                            <div style={{ maxHeight: "40vh", overflowY: "auto", display: "grid", gap: "0.5rem" }}>
-                                <button className="album-picker-item" onClick={handleCreateAndAdd} style={{ color: "var(--accent)" }}><Plus size={18} /> <span>New Album</span></button>
-                                {albums.map((a) => (
-                                    <button key={a.id} className="album-picker-item" onClick={() => handleAddToAlbum(a.id)} disabled={!!addingToAlbum}>
-                                        {addingToAlbum === a.id ? <Loader size={18} className="spin" /> : <Image size={18} color="var(--muted)" />}
-                                        <span>{a.name}</span>
+                        ) : albums.length === 0 ? (
+                            <div style={{ color: "var(--muted)", fontSize: "0.86rem", display: "grid", gap: "0.55rem" }}>
+                                <p>No albums found.</p>
+                                <button className="btn btn-secondary btn-sm" onClick={() => router.push("/albums")}>
+                                    Create Album
+                                </button>
+                            </div>
+                        ) : (
+                            <div style={{ display: "grid", gap: "0.55rem" }}>
+                                {albums.map((album) => (
+                                    <button
+                                        key={album.id}
+                                        className="album-picker-item"
+                                        onClick={() => addSelectedToAlbum(album.id)}
+                                        disabled={addingToAlbum}
+                                    >
+                                        <span style={{ textAlign: "left" }}>{album.name}</span>
+                                        <span style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{album.count}</span>
                                     </button>
                                 ))}
                             </div>
-                        </div>
+                        )}
                     </div>
-                )
-            }
+                </div>
+            )}
+
         </div >
     );
 }

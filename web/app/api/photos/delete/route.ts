@@ -1,95 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { getClient, getBucket } from "@/lib/r2";
+import { deleteAssets } from "@immich/sdk";
+import { initImmich, toImmichError } from "@/lib/immich-server";
+import { getAuthenticatedProfile } from "@/lib/supabase-server";
 
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
-    try {
-        const user = await getAuthenticatedProfile();
-        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const user = await getAuthenticatedProfile();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-        const supabase = createServiceClient();
-
-        const body = await req.json();
-        const ids: string[] = body.ids;
-        const permanent: boolean = body.permanent === true;
-
-        console.log(`[Delete API] Request: ids=${ids?.length}, permanent=${permanent}`);
-
-        if (!ids || !Array.isArray(ids) || ids.length === 0) {
-            return NextResponse.json({ error: "No ids provided" }, { status: 400 });
-        }
-
-        if (permanent) {
-            console.log("[Delete API] Starting permanent deletion...");
-            const s3 = getClient();
-            const bucket = getBucket();
-
-            // Fetch keys before deleting from DB
-            const { data: photos, error: fetchError } = await supabase
-                .from("photos")
-                .select("id, original_key, thumb_key")
-                .in("id", ids)
-                .eq("user_id", user.id);
-
-            if (fetchError) {
-                console.error("[Delete API] DB Fetch Error:", fetchError);
-                return NextResponse.json({ error: "DB fetch error" }, { status: 500 });
-            }
-
-            console.log(`[Delete API] Found ${photos?.length || 0} photos to delete from storage`);
-
-            for (const photo of photos || []) {
-                try {
-                    console.log(`[Delete API] Deleting original: ${photo.original_key}`);
-                    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: photo.original_key }));
-
-                    if (photo.thumb_key) {
-                        console.log(`[Delete API] Deleting thumbnail: ${photo.thumb_key}`);
-                        await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: photo.thumb_key }));
-                    }
-                } catch (err) {
-                    console.error(`[Delete API] R2 delete failed for ${photo.original_key}:`, err);
-                }
-            }
-
-            // Remove from DB permanently
-            const { error: dbError } = await supabase
-                .from("photos")
-                .delete()
-                .in("id", ids)
-                .eq("user_id", user.id);
-            if (dbError) {
-                console.error("[Delete API] DB Delete Error:", dbError);
-                return NextResponse.json({ error: "DB delete error" }, { status: 500 });
-            }
-
-            console.log("[Delete API] Permanent deletion complete");
-
-        } else {
-            console.log("[Delete API] Soft deleting photos...");
-            const { error: softError } = await supabase
-                .from("photos")
-                .update({
-                    is_deleted: true,
-                    deleted_at: new Date().toISOString()
-                })
-                .in("id", ids)
-                .eq("user_id", user.id);
-
-            if (softError) {
-                console.error("[Delete API] Soft Delete Error:", softError);
-                return NextResponse.json({ error: "DB soft delete error" }, { status: 500 });
-            }
-            console.log("[Delete API] Soft deletion complete");
-        }
-
-        return NextResponse.json({ ok: true, deleted: ids.length, permanent });
-    } catch (err) {
-        console.error("[Delete API] Unexpected Error:", err);
-        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const body = await req.json();
+    const ids = Array.isArray(body?.ids) ? body.ids.map((id: unknown) => String(id)) : [];
+    if (ids.length === 0) {
+      return NextResponse.json({ error: "No ids provided" }, { status: 400 });
     }
-}
 
+    initImmich();
+
+    const permanent = !!body?.permanent;
+    await deleteAssets({ assetBulkDeleteDto: { ids, force: permanent } });
+
+    return NextResponse.json({ ok: true, deleted: ids.length, permanent });
+  } catch (err) {
+    const { status, message } = toImmichError(err);
+    return NextResponse.json({ error: message }, { status });
+  }
+}

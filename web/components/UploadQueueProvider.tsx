@@ -3,10 +3,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthContext";
 import { UploadQueueStore, type UploadQueueItem } from "@/lib/upload-queue";
-import { calculateHash, extractMediaMetadata, generateMediaThumbnail, uploadToR2 } from "@/lib/upload-utils";
+import { calculateHash, extractMediaMetadata } from "@/lib/upload-utils";
 import { PhotoMetadataCache } from "@/lib/photo-cache";
 
-const MAX_HASHES_PER_REQUEST = 500;
 const QUEUE_MAX_ITEMS = 3000;
 const META_CONCURRENCY = 3;
 const UPLOAD_BASE_CONCURRENCY = 4;
@@ -92,23 +91,7 @@ async function withConcurrency<T>(
 
 async function checkDuplicateHashes(hashes: string[]): Promise<Set<string>> {
     if (hashes.length === 0) return new Set<string>();
-    const existing = new Set<string>();
-
-    for (let index = 0; index < hashes.length; index += MAX_HASHES_PER_REQUEST) {
-        const chunk = hashes.slice(index, index + MAX_HASHES_PER_REQUEST);
-        const response = await fetch("/api/upload/check-duplicates", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ hashes: chunk }),
-        });
-        if (!response.ok) continue;
-        const data = await response.json();
-        for (const hash of data?.existingHashes || []) {
-            if (typeof hash === "string") existing.add(hash);
-        }
-    }
-
-    return existing;
+    return new Set<string>();
 }
 
 export function UploadQueueProvider({ children }: { children: React.ReactNode }) {
@@ -178,10 +161,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
     const uploadOne = useCallback(async (item: UploadQueueItem) => {
         if (!navigator.onLine) {
-            // Silently skip — scheduler will retry when online
             await patchQueueItem(item.local_id, { status: "queued_upload", progress: 0 });
             return;
         }
+
         const startAttemptAt = new Date().toISOString();
         await patchQueueItem(item.local_id, {
             status: "uploading",
@@ -216,83 +199,27 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 if (patched) currentItem = patched;
             }
 
-            if (currentItem.content_hash) {
-                const duplicates = await checkDuplicateHashes([currentItem.content_hash]);
-                if (duplicates.has(currentItem.content_hash)) {
-                    console.info("[UPLOAD-QUEUE] duplicate detected before upload:", currentItem.original_name);
-                    await removeQueueItem(currentItem.local_id);
-                    return;
-                }
-            }
+            await patchQueueItem(currentItem.local_id, { progress: 30 }, false);
 
-            const presignRes = await fetch(
-                `/api/upload/presign?filename=${encodeURIComponent(currentItem.original_name)}&type=${currentItem.mime_type || "application/octet-stream"}`,
-            );
-            if (!presignRes.ok) {
-                throw new Error(`Presign failed (${presignRes.status})`);
-            }
-            const presigned = await presignRes.json();
-            const originalKey = presigned.originalKey as string;
-            const thumbKey = presigned.thumbKey as string;
-            const uploadUrl = presigned.uploadUrl as string;
-            const thumbUploadUrl = presigned.thumbUploadUrl as string;
-            const fileId = presigned.fileId as string;
+            const formData = new FormData();
+            formData.append("file", currentItem.file_blob as File);
+            formData.append("takenAt", currentItem.taken_at || "");
+            formData.append("durationMs", String(currentItem.duration_ms ?? ""));
+            formData.append("createdAt", currentItem.created_at);
+            formData.append("contentHash", currentItem.content_hash || "");
 
-            await patchQueueItem(currentItem.local_id, { progress: 20 }, false);
-
-            const uploadPromise = uploadToR2(currentItem.file_blob as File, uploadUrl, (pct) => {
-                void patchQueueItem(currentItem.local_id, { progress: 20 + Math.round(pct * 0.5) }, false);
-            });
-
-            const thumbPromise = (async () => {
-                try {
-                    const thumbBlob = await generateMediaThumbnail(currentItem.file_blob as File);
-                    const thumbFile = new File([thumbBlob], `thumb_${currentItem.original_name}`, { type: "image/webp" });
-                    await uploadToR2(thumbFile, thumbUploadUrl, () => { });
-                } catch (err) {
-                    console.warn("[UPLOAD-QUEUE] thumbnail generation/upload failed:", err);
-                }
-            })();
-
-            await Promise.all([uploadPromise, thumbPromise]).catch(async (err) => {
-                await fetch("/api/upload/cleanup", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ originalKey: originalKey || null, thumbKey: thumbKey || null }),
-                }).catch(() => { });
-                throw err;
-            });
-
-            await patchQueueItem(currentItem.local_id, { progress: 85 }, false);
-
-            const completeRes = await fetch("/api/upload/complete", {
+            const uploadRes = await fetch("/api/upload", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: fileId,
-                    original_key: originalKey,
-                    original_name: currentItem.original_name,
-                    thumb_key: thumbKey,
-                    mime_type: currentItem.mime_type,
-                    media_type: currentItem.mime_type.startsWith("video/") ? "video" : "image",
-                    size_bytes: currentItem.size_bytes,
-                    width: currentItem.width,
-                    height: currentItem.height,
-                    duration_ms: currentItem.duration_ms,
-                    taken_at: currentItem.taken_at,
-                    content_hash: currentItem.content_hash,
-                    metadata: currentItem.metadata,
-                }),
+                body: formData,
             });
-
-            const completeData = await completeRes.json();
-
-            if (!completeRes.ok) {
-                if (completeRes.status === 409 || String(completeData?.error || "").toLowerCase().includes("duplicate")) {
+            const uploadData = await uploadRes.json().catch(() => ({}));
+            if (!uploadRes.ok) {
+                const reason = String(uploadData?.error || `Upload failed (${uploadRes.status})`);
+                if (uploadRes.status === 409 || reason.toLowerCase().includes("duplicate")) {
                     await removeQueueItem(currentItem.local_id);
                     return;
                 }
-                throw new Error(completeData?.error || `Upload completion failed (${completeRes.status})`);
+                throw new Error(reason);
             }
 
             await patchQueueItem(currentItem.local_id, {
@@ -300,7 +227,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 progress: 100,
                 error: null,
                 attempts: 0,
-                server_photo_id: completeData?.photo?.id || null,
+                server_photo_id: uploadData?.photo?.id || null,
             });
             await PhotoMetadataCache.clear();
             await PhotoMetadataCache.setHash("");
@@ -649,11 +576,12 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     }, [queueItems]);
 
     useEffect(() => {
+        const previewMap = previewUrlsRef.current;
         return () => {
-            for (const url of previewUrlsRef.current.values()) {
+            for (const url of previewMap.values()) {
                 URL.revokeObjectURL(url);
             }
-            previewUrlsRef.current.clear();
+            previewMap.clear();
         };
     }, []);
 

@@ -4,7 +4,7 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Loader, Maximize2, MessageCircle, Pause, Play, Send, Trash2, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Loader, Maximize2, MessageCircle, Pause, Play, Send, Trash2, Users, Volume2, VolumeX } from "lucide-react";
 import { ImageBlobCache, PhotoDetailCache, VideoBlobCache } from "@/lib/photo-cache";
 import { useAuth } from "@/components/AuthContext";
 
@@ -193,6 +193,11 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 
     const download = async () => {
         if (!photo) return;
+        if (!photo.id.startsWith("local:")) {
+            const direct = `/api/media/${photo.id}/original?download=1&filename=${encodeURIComponent(photo.filename || "asset")}`;
+            window.open(direct, "_blank");
+            return;
+        }
         const r = await fetch(photo.url).catch(() => null);
         if (!r) return window.open(photo.url, "_blank");
         const b = await r.blob();
@@ -258,6 +263,16 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                         <button className="btn btn-ghost btn-sm" onClick={like}><Heart size={16} fill={photo?.isLiked ? "#ff4d6a" : "none"} color={photo?.isLiked ? "#ff4d6a" : "#fff"} /></button>
                         <button className="btn btn-ghost btn-sm" onClick={download}><Download size={16} /></button>
                         <button className="btn btn-ghost btn-sm" onClick={del}><Trash2 size={16} color="#f87171" /></button>
+                        <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                                if (!photo) return;
+                                router.push(`/photo/${photo.id}/faces`);
+                            }}
+                            disabled={!photo}
+                        >
+                            <Users size={16} />
+                        </button>
                         <button
                             className="btn btn-ghost btn-sm"
                             onClick={() => {

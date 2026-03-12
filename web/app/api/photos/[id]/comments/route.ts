@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { AssetTypeEnum } from "@immich/sdk";
 import { createServiceClient, getAuthenticatedProfile } from "@/lib/supabase-server";
 import { resolveAvatarUrl } from "@/lib/avatar";
+import { getImmichAssetById, parseDurationMs } from "@/lib/immich-server";
 
 type ServiceClient = ReturnType<typeof createServiceClient>;
 type CommentRow = {
@@ -12,14 +14,37 @@ type CommentRow = {
     updated_at: string;
 };
 
-async function canAccessPhoto(supabase: ServiceClient, photoId: string) {
-    const { data } = await supabase
-        .from("photos")
-        .select("id")
-        .eq("id", photoId)
-        .eq("is_deleted", false)
-        .single();
-    return !!data;
+async function ensurePhotoShadow(supabase: ServiceClient, photoId: string, userId: string) {
+  const asset = await getImmichAssetById(photoId).catch(() => null);
+  if (!asset) return false;
+
+  const { error } = await supabase
+    .from("photos")
+    .upsert(
+      {
+        id: asset.id,
+        original_key: `immich:${asset.id}`,
+        original_name: asset.originalFileName || asset.id,
+        mime_type: asset.originalMimeType || (asset.type === AssetTypeEnum.Video ? "video/mp4" : "image/jpeg"),
+        size_bytes: Number(asset.exifInfo?.fileSizeInByte || 0),
+        created_at: asset.createdAt,
+        taken_at: asset.exifInfo?.dateTimeOriginal || null,
+        media_type: asset.type === AssetTypeEnum.Video ? "video" : "image",
+        duration_ms: parseDurationMs(asset.duration),
+        is_deleted: !!asset.isTrashed,
+        user_id: userId,
+      },
+      { onConflict: "id" },
+    )
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("[COMMENTS] failed syncing photo shadow:", error);
+    return false;
+  }
+
+  return !asset.isTrashed;
 }
 
 export async function GET(
@@ -32,7 +57,7 @@ export async function GET(
 
         const { id: photoId } = await params;
         const supabase = createServiceClient();
-        const allowed = await canAccessPhoto(supabase, photoId);
+        const allowed = await ensurePhotoShadow(supabase, photoId, user.id);
         if (!allowed) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
 
         const { data, error } = await supabase
@@ -94,7 +119,7 @@ export async function POST(
         if (text.length > 2000) return NextResponse.json({ error: "Comment is too long" }, { status: 400 });
 
         const supabase = createServiceClient();
-        const allowed = await canAccessPhoto(supabase, photoId);
+        const allowed = await ensurePhotoShadow(supabase, photoId, user.id);
         if (!allowed) return NextResponse.json({ error: "Photo not found" }, { status: 404 });
 
         const { data: inserted, error } = await supabase
