@@ -4,10 +4,12 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Info, Loader, Maximize2, MessageCircle, Pause, Play, Send, Trash2, Users, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, Heart, Loader, Maximize2, MoreHorizontal, Pause, Play, Send, Trash2, Users, Volume2, VolumeX, X } from "lucide-react";
 import { ImageBlobCache, PhotoDetailCache, VideoBlobCache } from "@/lib/photo-cache";
 import { useAuth } from "@/components/AuthContext";
 import { UserAvatar } from "@/components/UserAvatar";
+import { safeSessionStorageGet } from "@/lib/browser-storage";
+import { navigateBackOr } from "@/lib/navigation";
 
 type PhotoDetail = {
     id: string;
@@ -38,6 +40,11 @@ type CommentItem = {
     user?: { username?: string; full_name?: string; avatar_url?: string | null } | null;
 };
 
+let photoViewerSnapshot: { photos: Record<string, PhotoDetail>; comments: Record<string, CommentItem[]> } = {
+    photos: {},
+    comments: {},
+};
+
 const mt = (p: PhotoDetail) => (p.mediaType === "video" || p.mimeType?.startsWith("video/") ? "video" : "image");
 const fb = (b: number) => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 const fd = (i: string) => new Date(i).toLocaleString("en-IN");
@@ -47,25 +54,32 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     const initialId = use(params).id;
     const router = useRouter();
     const { user } = useAuth();
+    const moreMenuRef = useRef<HTMLDivElement | null>(null);
     const [idList, setIdList] = useState<string[]>([]);
     const [idx, setIdx] = useState(0);
-    const [photos, setPhotos] = useState<Record<string, PhotoDetail>>({});
+    const [photos, setPhotos] = useState<Record<string, PhotoDetail>>(() => {
+        if (photoViewerSnapshot.photos[initialId]) {
+            return { [initialId]: photoViewerSnapshot.photos[initialId] };
+        }
+        return {};
+    });
     const [panel, setPanel] = useState<"info" | "comments">("info");
     const [panelOpen, setPanelOpen] = useState(false);
-    const [comments, setComments] = useState<Record<string, CommentItem[]>>({});
+    const [comments, setComments] = useState<Record<string, CommentItem[]>>(() => photoViewerSnapshot.comments);
     const [commentsLoading, setCommentsLoading] = useState(false);
     const [draft, setDraft] = useState("");
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingDraft, setEditingDraft] = useState("");
     const [loading, setLoading] = useState(true);
     const [isZoomed, setIsZoomed] = useState(false);
+    const [moreOpen, setMoreOpen] = useState(false);
     const isLocal = initialId.startsWith("local:");
     const currentId = idList[idx];
     const photo = currentId ? photos[currentId] : null;
 
     useEffect(() => {
         if (isLocal) {
-            const s = sessionStorage.getItem("local_photo_preview");
+            const s = safeSessionStorageGet("local_photo_preview");
             if (s) {
                 const p = JSON.parse(s);
                 setPhotos({
@@ -91,7 +105,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
             setLoading(false);
             return;
         }
-        const ctx = sessionStorage.getItem("current_gallery_context");
+        const ctx = safeSessionStorageGet("current_gallery_context");
         if (ctx) {
             try {
                 const ids = JSON.parse(ctx) as string[];
@@ -105,11 +119,31 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     }, [initialId, isLocal]);
 
     useEffect(() => {
+        photoViewerSnapshot = { photos, comments };
+    }, [comments, photos]);
+
+    useEffect(() => {
         // Default closed on mobile; open by default on desktop.
         if (window.matchMedia("(min-width: 1024px)").matches) {
             setPanelOpen(true);
         }
     }, []);
+
+    useEffect(() => {
+        if (!moreOpen) return;
+        const handlePointer = (event: MouseEvent | TouchEvent) => {
+            const target = event.target as Node | null;
+            if (!target) return;
+            if (moreMenuRef.current?.contains(target)) return;
+            setMoreOpen(false);
+        };
+        window.addEventListener("mousedown", handlePointer);
+        window.addEventListener("touchstart", handlePointer);
+        return () => {
+            window.removeEventListener("mousedown", handlePointer);
+            window.removeEventListener("touchstart", handlePointer);
+        };
+    }, [moreOpen]);
 
     const preload = useCallback(async (id: string) => {
         if (!id || id.startsWith("local:") || photos[id]) return;
@@ -127,6 +161,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         const prev = idx > 0 ? idList[idx - 1] : null;
         const next = idx < idList.length - 1 ? idList[idx + 1] : null;
         setLoading(!photos[c]);
+        setMoreOpen(false);
         void preload(c);
         if (prev) void preload(prev);
         if (next) void preload(next);
@@ -137,34 +172,25 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "ArrowLeft") setIdx((v) => Math.max(0, v - 1));
             if (e.key === "ArrowRight") setIdx((v) => Math.min(idList.length - 1, v + 1));
-            if (e.key === "Escape") router.back();
+            if (e.key === "Escape") navigateBackOr(router, "/");
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [idList.length, router]);
 
-    useEffect(() => {
-        // Prevent browser/page pinch zoom while inside the immersive media viewer.
-        const preventGesture = (e: Event) => {
-            if ("cancelable" in e && (e as Event).cancelable) e.preventDefault();
-        };
-        document.addEventListener("gesturestart", preventGesture, { passive: false });
-        document.addEventListener("gesturechange", preventGesture, { passive: false });
-        document.addEventListener("gestureend", preventGesture, { passive: false });
-        return () => {
-            document.removeEventListener("gesturestart", preventGesture as EventListener);
-            document.removeEventListener("gesturechange", preventGesture as EventListener);
-            document.removeEventListener("gestureend", preventGesture as EventListener);
-        };
-    }, []);
-
     const loadComments = useCallback(async (pid: string) => {
         if (!pid || pid.startsWith("local:")) return;
-        setCommentsLoading(true);
-        const res = await fetch(`/api/photos/${pid}/comments`).catch(() => null);
+        if (!photoViewerSnapshot.comments[pid]) {
+            setCommentsLoading(true);
+        }
+        const res = await fetch(`/api/photos/${pid}/comments`, { cache: "no-store" }).catch(() => null);
         if (res?.ok) {
             const data = await res.json();
-            setComments((p) => ({ ...p, [pid]: data.comments || [] }));
+            setComments((p) => {
+                const next = { ...p, [pid]: data.comments || [] };
+                photoViewerSnapshot.comments = next;
+                return next;
+            });
         }
         setCommentsLoading(false);
     }, []);
@@ -187,7 +213,7 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
         const id = photo.id;
         const next = idList.filter((x) => x !== id);
         setIdList(next);
-        if (!next.length) router.back();
+        if (!next.length) navigateBackOr(router, "/");
         else setIdx((v) => Math.min(v, next.length - 1));
         await fetch("/api/photos/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [id] }) }).catch(() => { });
     };
@@ -253,45 +279,79 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 
     return (
         <div style={{ position: "fixed", inset: 0, background: "#000", color: "#fff", display: "flex", flexDirection: "column", zIndex: 100 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "0.5rem", background: "rgba(0,0,0,0.5)" }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn btn-ghost btn-sm" onClick={() => router.back()}><ArrowLeft size={16} /></button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setIdx((v) => Math.max(0, v - 1))} disabled={idx <= 0}><ChevronLeft size={16} /></button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setIdx((v) => Math.min(idList.length - 1, v + 1))} disabled={idx >= idList.length - 1}><ChevronRight size={16} /></button>
+            <div className="glass" style={{ position: "absolute", top: '16px', left: '16px', right: '16px', display: "flex", justifyContent: "space-between", gap: "0.75rem", padding: "0.8rem 1.2rem", borderRadius: 'var(--r-md)', zIndex: 50, border: 'none' }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <button className="btn btn-ghost btn-sm" onClick={() => navigateBackOr(router, "/")} aria-label="Back to timeline"><ArrowLeft size={16} /></button>
+                    <div style={{ minWidth: 0, marginLeft: "0.35rem" }}>
+                        <div style={{ fontSize: "0.92rem", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "min(46vw, 360px)" }}>
+                            {photo?.filename || "Loading asset..."}
+                        </div>
+                        <div style={{ fontSize: "0.74rem", color: "rgba(255,255,255,0.68)" }}>
+                            {idList.length ? `${idx + 1} of ${idList.length}` : "Single item"}
+                        </div>
+                    </div>
                 </div>
                 {!isLocal && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                        <button className="btn btn-ghost btn-sm" onClick={like}><Heart size={16} fill={photo?.isLiked ? "#ff4d6a" : "none"} color={photo?.isLiked ? "#ff4d6a" : "#fff"} /></button>
-                        <button className="btn btn-ghost btn-sm" onClick={download}><Download size={16} /></button>
-                        <button className="btn btn-ghost btn-sm" onClick={del}><Trash2 size={16} color="#f87171" /></button>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", position: "relative" }}>
                         <button
                             className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                                if (!photo) return;
-                                router.push(`/photo/${photo.id}/faces`);
-                            }}
-                            disabled={!photo}
+                            onClick={() => setMoreOpen((open) => !open)}
+                            aria-label="More actions"
                         >
-                            <Users size={16} />
+                            <MoreHorizontal size={16} />
                         </button>
-                        <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                                setPanelOpen((open) => (panel === "info" ? !open : true));
-                                setPanel("info");
-                            }}
-                        >
-                            <Info size={16} />
-                        </button>
-                        <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                                setPanelOpen((open) => (panel === "comments" ? !open : true));
-                                setPanel("comments");
-                            }}
-                        >
-                            <MessageCircle size={16} />
-                        </button>
+                        {moreOpen && (
+                            <div
+                                ref={moreMenuRef}
+                                style={{
+                                    position: "absolute",
+                                    top: "calc(100% + 0.45rem)",
+                                    right: 0,
+                                    minWidth: 180,
+                                    display: "grid",
+                                    gap: 6,
+                                    padding: "0.45rem",
+                                    borderRadius: 16,
+                                    background: "rgba(18, 20, 26, 0.96)",
+                                    border: "1px solid rgba(255,255,255,0.12)",
+                                    boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+                                    zIndex: 45,
+                                }}
+                            >
+                                <button
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ justifyContent: "flex-start" }}
+                                    onClick={() => {
+                                        setMoreOpen(false);
+                                        void like();
+                                    }}
+                                >
+                                    <Heart size={14} fill={photo?.isLiked ? "#ff4d6a" : "none"} color={photo?.isLiked ? "#ff4d6a" : "currentColor"} />
+                                    {photo?.isLiked ? "Remove favorite" : "Add favorite"}
+                                </button>
+                                <button className="btn btn-ghost btn-sm" style={{ justifyContent: "flex-start" }} onClick={() => { setMoreOpen(false); void download(); }}>
+                                    <Download size={14} />
+                                    Download
+                                </button>
+                                <button
+                                    className="btn btn-ghost btn-sm"
+                                    style={{ justifyContent: "flex-start" }}
+                                    onClick={() => {
+                                        if (!photo) return;
+                                        setMoreOpen(false);
+                                        router.push(`/photo/${photo.id}/faces`);
+                                    }}
+                                    disabled={!photo}
+                                >
+                                    <Users size={14} />
+                                    Face tools
+                                </button>
+                                <button className="btn btn-ghost btn-sm" style={{ justifyContent: "flex-start", color: "#fca5a5" }} onClick={() => { setMoreOpen(false); void del(); }}>
+                                    <Trash2 size={14} />
+                                    Move to trash
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -299,14 +359,77 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
             <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
                 <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
                     <Slider ids={idList} idx={idx} photos={photos} setIdx={setIdx} zoomLocked={isZoomed} onZoomChange={setIsZoomed} />
+                    {!isLocal && idx > 0 && (
+                        <button
+                            className="desktop-only btn btn-ghost btn-sm"
+                            onClick={() => setIdx((v) => Math.max(0, v - 1))}
+                            aria-label="Previous asset"
+                            style={{ position: "absolute", left: 18, top: "50%", transform: "translateY(-50%)", zIndex: 20, background: "rgba(0,0,0,0.45)" }}
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+                    )}
+                    {!isLocal && idx < idList.length - 1 && (
+                        <button
+                            className="desktop-only btn btn-ghost btn-sm"
+                            onClick={() => setIdx((v) => Math.min(idList.length - 1, v + 1))}
+                            aria-label="Next asset"
+                            style={{ position: "absolute", right: 18, top: "50%", transform: "translateY(-50%)", zIndex: 20, background: "rgba(0,0,0,0.45)" }}
+                        >
+                            <ChevronRight size={18} />
+                        </button>
+                    )}
                     {loading && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}><Loader className="spin" /></div>}
+                    {!isLocal && !panelOpen && (
+                        <div
+                            className="mobile-only"
+                            style={{
+                                position: "absolute",
+                                left: "50%",
+                                bottom: "max(1rem, env(safe-area-inset-bottom))",
+                                transform: "translateX(-50%)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "0.35rem",
+                                borderRadius: 999,
+                                background: "rgba(12, 12, 18, 0.78)",
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                zIndex: 26,
+                            }}
+                        >
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                style={{ minHeight: 34, color: panelOpen && panel === "info" ? "#fff" : "rgba(255,255,255,0.78)" }}
+                                onClick={() => {
+                                    setPanel("info");
+                                    setPanelOpen((open) => (panel === "info" ? !open : true));
+                                }}
+                            >
+                                Details
+                            </button>
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                style={{ minHeight: 34, color: panelOpen && panel === "comments" ? "#fff" : "rgba(255,255,255,0.78)" }}
+                                onClick={() => {
+                                    setPanel("comments");
+                                    setPanelOpen((open) => (panel === "comments" ? !open : true));
+                                }}
+                            >
+                                Comments
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {panelOpen && photo && (
-                    <aside className="desktop-only" style={{ width: 340, background: "var(--bg-elevated)", color: "var(--ink)", borderLeft: "1px solid var(--line)", display: "flex", flexDirection: "column" }}>
-                        <div style={{ display: "flex", borderBottom: "1px solid var(--line)" }}>
-                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Info</button>
+                    <aside className="desktop-only glass" style={{ width: 340, margin: '16px', borderRadius: 'var(--r-lg)', border: 'none', display: "flex", flexDirection: "column", height: 'calc(100% - 32px)' }}>
+                        <div className="glass" style={{ display: "flex", alignItems: "center", border: 'none', borderRadius: 'var(--r-md) var(--r-md) 0 0', margin: '4px' }}>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Details</button>
                             <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "comments" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("comments")}>Comments</button>
+                            <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0 }} onClick={() => setPanelOpen(false)} aria-label="Close drawer">
+                                <X size={16} />
+                            </button>
                         </div>
                         {panel === "info" ? (
                             <InfoSection photo={photo} />
@@ -333,9 +456,12 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 
                 {panelOpen && photo && (
                     <div className="mobile-only" style={{ position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "52vh", background: "var(--bg-elevated)", color: "var(--ink)", borderTop: "1px solid var(--line)", zIndex: 35 }}>
-                        <div style={{ display: "flex", borderBottom: "1px solid var(--line)" }}>
-                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Info</button>
+                        <div style={{ display: "flex", borderBottom: "1px solid var(--line)", alignItems: "center" }}>
+                            <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Details</button>
                             <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "comments" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("comments")}>Comments</button>
+                            <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0 }} onClick={() => setPanelOpen(false)} aria-label="Close drawer">
+                                <X size={16} />
+                            </button>
                         </div>
                         <div style={{ maxHeight: "44vh", overflowY: "auto", paddingBottom: "env(safe-area-inset-bottom)" }}>
                             {panel === "info" ? (
@@ -367,21 +493,47 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
 }
 
 function InfoSection({ photo }: { photo: PhotoDetail }) {
+    const summary = [
+        { label: "Type", value: mt(photo) === "video" ? "Video" : "Image" },
+        { label: mt(photo) === "video" ? "Duration" : "Size", value: mt(photo) === "video" ? fm(photo.durationMs) : fb(photo.sizeBytes) },
+        { label: "Resolution", value: photo.width && photo.height ? `${photo.width} x ${photo.height}` : "Unknown" },
+    ];
+    const cameraRows = [
+        photo.cameraModel ? { label: "Camera", value: photo.cameraModel } : null,
+        photo.lensModel ? { label: "Lens", value: photo.lensModel } : null,
+        photo.aperture ? { label: "Aperture", value: `f/${photo.aperture}` } : null,
+        photo.iso ? { label: "ISO", value: `${photo.iso}` } : null,
+        photo.shutterSpeed ? { label: "Shutter", value: photo.shutterSpeed } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
+
     return (
-        <div style={{ padding: "0.9rem", display: "grid", gap: 8, fontSize: 13 }}>
-            <Meta label="Filename" value={photo.filename} />
-            <Meta label="Type" value={mt(photo) === "video" ? "Video" : "Image"} />
-            <Meta label="Format" value={photo.mimeType} />
-            {mt(photo) === "video" && <Meta label="Duration" value={fm(photo.durationMs)} />}
-            {photo.width && photo.height && <Meta label="Resolution" value={`${photo.width} x ${photo.height}`} />}
-            <Meta label="Size" value={fb(photo.sizeBytes)} />
-            <Meta label="Captured" value={photo.takenAt ? fd(photo.takenAt) : "Unknown"} />
-            <Meta label="Uploaded" value={fd(photo.createdAt)} />
-            {photo.cameraModel && <Meta label="Camera" value={photo.cameraModel} />}
-            {photo.lensModel && <Meta label="Lens" value={photo.lensModel} />}
-            {photo.shutterSpeed && <Meta label="Shutter" value={photo.shutterSpeed} />}
-            {photo.aperture && <Meta label="Aperture" value={`f/${photo.aperture}`} />}
-            {photo.iso && <Meta label="ISO" value={`${photo.iso}`} />}
+        <div style={{ padding: "0.95rem", display: "grid", gap: 12, fontSize: 13 }}>
+            <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{photo.filename}</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>{photo.mimeType}</div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 8 }}>
+                {summary.map((item) => (
+                    <div key={item.label} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: "0.6rem 0.65rem", background: "var(--bg-subtle)" }}>
+                        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)", marginBottom: 4 }}>{item.label}</div>
+                        <div style={{ fontWeight: 700, color: "var(--ink)", lineHeight: 1.25 }}>{item.value}</div>
+                    </div>
+                ))}
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>Timeline</div>
+                <Meta label="Captured" value={photo.takenAt ? fd(photo.takenAt) : "Unknown"} />
+                <Meta label="Uploaded" value={fd(photo.createdAt)} />
+            </div>
+
+            {cameraRows.length > 0 && (
+                <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--muted)" }}>Camera</div>
+                    {cameraRows.map((row) => <Meta key={row.label} label={row.label} value={row.value} />)}
+                </div>
+            )}
         </div>
     );
 }

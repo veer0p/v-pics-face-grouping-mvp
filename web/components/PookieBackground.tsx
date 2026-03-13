@@ -1,117 +1,46 @@
 "use client";
-import React, { useEffect, useRef } from 'react';
 
-interface Particle {
-    x: number;
-    y: number;
-    size: number;
-    speed: number;
-    opacity: number;
-    emoji: string;
-    drift: number;
-    driftSpeed: number;
+import React, { useMemo } from "react";
+
+const PATTERN_SWATCHES = [
+    { stroke: "#B66A85", fill: "#F7E2D6" },
+    { stroke: "#C5967F", fill: "#F7E7D3" },
+    { stroke: "#9F6988", fill: "#F2E2EA" },
+    { stroke: "#B97891", fill: "#F6E4EA" },
+    { stroke: "#C8A279", fill: "#F8EBD7" },
+];
+
+function buildPattern(stroke: string, fill: string) {
+    return `data:image/svg+xml,${encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
+            <g fill="none" stroke="${stroke}" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" opacity="0.52">
+                <path d="M38 44l3.5 8 8 3.5-8 3.5-3.5 8-3.5-8-8-3.5 8-3.5z"/>
+                <path d="M174 42l2.8 6.5 6.5 2.8-6.5 2.8-2.8 6.5-2.8-6.5-6.5-2.8 6.5-2.8z"/>
+                <path d="M76 148c10-9 22-9 32 0-10 10-22 10-32 0Z"/>
+                <path d="M144 148c-10-9-22-9-32 0 10 10 22 10 32 0Z"/>
+                <path d="M110 146v23"/>
+                <path d="M62 96c5-7 11-10 18-10s13 3 18 10"/>
+                <circle cx="70" cy="114" r="2.2" fill="${fill}" stroke="none" opacity="0.75"/>
+                <circle cx="146" cy="104" r="2.8" fill="${fill}" stroke="none" opacity="0.72"/>
+                <circle cx="168" cy="166" r="2.1" fill="${fill}" stroke="none" opacity="0.68"/>
+            </g>
+        </svg>`,
+    )}`;
 }
 
 export const PookieBackground: React.FC<{ accentIndex?: number }> = ({ accentIndex = 0 }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        let width = (canvas.width = window.innerWidth);
-        let height = (canvas.height = window.innerHeight);
-
-        const emojiSets = [
-            ["❤️", "✨", "🌸", "🎀", "🍓", "🍭"], // Strawberry
-            ["✨", "💜", "🌌", "🦄", "🌙", "🪁"], // Lavender
-            ["🎃", "🍊", "☀️", "✨", "🍦", "🎈"], // Peach
-            ["🍃", "🌿", "🍀", "✨", "🍏", "🍵"], // Mint
-            ["☁️", "✈️", "✨", "💙", "🪁", "🎈"], // Sky
-        ];
-        const emojis = emojiSets[accentIndex] || emojiSets[0];
-        const particles: Particle[] = [];
-        const particleCount = 28; // Keep it clean and elegant
-
-        // Initialize particles
-        for (let i = 0; i < particleCount; i++) {
-            particles.push(createParticle(true));
-        }
-
-        function createParticle(randomY = false): Particle {
-            return {
-                x: Math.random() * width,
-                y: randomY ? Math.random() * height : -50,
-                size: 12 + Math.random() * 12,
-                speed: 0.4 + Math.random() * 0.8,
-                opacity: 0.2 + Math.random() * 0.4,
-                emoji: emojis[Math.floor(Math.random() * emojis.length)],
-                drift: 0,
-                driftSpeed: (Math.random() - 0.5) * 0.02
-            };
-        }
-
-        const draw = () => {
-            ctx.clearRect(0, 0, width, height);
-
-            particles.forEach((p, index) => {
-                ctx.globalAlpha = p.opacity;
-                ctx.font = `${p.size}px serif`;
-
-                // Organic drift movement (sine wave)
-                p.drift += p.driftSpeed;
-                const currentX = p.x + Math.sin(p.drift) * 30;
-
-                ctx.fillText(p.emoji, currentX, p.y);
-
-                // Movement
-                p.y += p.speed;
-
-                // Reset particle when it leaves screen
-                if (p.y > height + 50) {
-                    particles[index] = createParticle();
-                }
-
-                // Loop X if it drifts too far
-                if (p.x > width + 100) p.x = -50;
-                if (p.x < -100) p.x = width + 50;
-            });
-
-            requestAnimationFrame(draw);
-        };
-
-        const animationId = requestAnimationFrame(draw);
-
-        const handleResize = () => {
-            width = canvas.width = window.innerWidth;
-            height = canvas.height = window.innerHeight;
-        };
-
-        window.addEventListener('resize', handleResize);
-
-        return () => {
-            cancelAnimationFrame(animationId);
-            window.removeEventListener('resize', handleResize);
-        };
-    }, [accentIndex]);
+    const swatch = PATTERN_SWATCHES[accentIndex % PATTERN_SWATCHES.length] || PATTERN_SWATCHES[0];
+    const patternImage = useMemo(() => `url("${buildPattern(swatch.stroke, swatch.fill)}")`, [swatch.fill, swatch.stroke]);
 
     return (
-        <canvas
-            ref={canvasRef}
-            style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                width: '100vw',
-                height: '100vh',
-                zIndex: -1,
-                pointerEvents: 'none',
-                background: 'var(--bg)', // Theme base
-                transition: 'background 1s ease',
-            }}
-        />
+        <div className="luxury-cute-bg" aria-hidden="true">
+            <div className="luxury-cute-bg-gradient" />
+            <div className="luxury-cute-bg-sheen" />
+            <div className="luxury-cute-bg-pattern" style={{ backgroundImage: patternImage }} />
+            <div className="luxury-cute-bg-grain" />
+            <span className="luxury-cute-orb orb-a" />
+            <span className="luxury-cute-orb orb-b" />
+            <span className="luxury-cute-orb orb-c" />
+        </div>
     );
 };

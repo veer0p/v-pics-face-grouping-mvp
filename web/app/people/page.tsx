@@ -1,9 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader, Upload, Users } from "lucide-react";
+import { Images, Loader, ScanFace, Settings2, Upload, Users } from "lucide-react";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
+import { PageHeader } from "@/components/PageHeader";
+import { safeSessionStorageSet } from "@/lib/browser-storage";
 import type { Photo } from "@/lib/photo-cache";
 
 type PersonItem = {
@@ -38,6 +41,24 @@ type UnassignedFace = {
   sourceType: string | null;
 };
 
+type PeopleSnapshot = {
+  people: PersonItem[];
+  selectedPersonId: string | null;
+  unassignedFaces: UnassignedFace[];
+  byPerson: Record<string, {
+    details: PersonDetails | null;
+    photos: Photo[];
+    total: number;
+  }>;
+};
+
+let peoplePageSnapshot: PeopleSnapshot = {
+  people: [],
+  selectedPersonId: null,
+  unassignedFaces: [],
+  byPerson: {},
+};
+
 function normalizePercent(value: number, max: number) {
   if (!Number.isFinite(value)) return 0;
   if (!Number.isFinite(max) || max <= 0) return Math.max(0, Math.min(value * 100, 100));
@@ -60,28 +81,49 @@ function buildFaceBoxStyle(face: UnassignedFace) {
   };
 }
 
+function formatDateHeader(date: Date) {
+  const now = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === now.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const options: Intl.DateTimeFormatOptions = {
+    day: "numeric",
+    month: "long",
+    year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  };
+  return date.toLocaleDateString(undefined, options);
+}
+
 export default function PeoplePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedPersonIdParam = searchParams.get("personId");
+  const cachedSelectedData = peoplePageSnapshot.selectedPersonId
+    ? peoplePageSnapshot.byPerson[peoplePageSnapshot.selectedPersonId]
+    : null;
+  const personLoadRequest = useRef(0);
 
-  const [people, setPeople] = useState<PersonItem[]>([]);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
-  const [selectedDetails, setSelectedDetails] = useState<PersonDetails | null>(null);
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [photosTotal, setPhotosTotal] = useState(0);
-  const [loadingPeople, setLoadingPeople] = useState(true);
-  const [loadingPersonData, setLoadingPersonData] = useState(false);
+  const [people, setPeople] = useState<PersonItem[]>(() => peoplePageSnapshot.people);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(() => peoplePageSnapshot.selectedPersonId);
+  const [selectedDetails, setSelectedDetails] = useState<PersonDetails | null>(() => cachedSelectedData?.details || null);
+  const [photos, setPhotos] = useState<Photo[]>(() => cachedSelectedData?.photos || []);
+  const [photosTotal, setPhotosTotal] = useState(() => cachedSelectedData?.total || 0);
+  const [loadingPeople, setLoadingPeople] = useState(() => peoplePageSnapshot.people.length === 0);
+  const [loadingPersonData, setLoadingPersonData] = useState(() => !cachedSelectedData && !!peoplePageSnapshot.selectedPersonId);
+  const [syncing, setSyncing] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<"timeline" | "unassigned">("timeline");
 
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [mergeSourceId, setMergeSourceId] = useState("");
   const [merging, setMerging] = useState(false);
 
-  const [unassignedFaces, setUnassignedFaces] = useState<UnassignedFace[]>([]);
+  const [unassignedFaces, setUnassignedFaces] = useState<UnassignedFace[]>(() => peoplePageSnapshot.unassignedFaces);
   const [selectedFaceIds, setSelectedFaceIds] = useState<string[]>([]);
   const [bulkPersonId, setBulkPersonId] = useState("");
-  const [loadingUnassigned, setLoadingUnassigned] = useState(true);
+  const [loadingUnassigned, setLoadingUnassigned] = useState(() => peoplePageSnapshot.unassignedFaces.length === 0);
   const [assigningFaces, setAssigningFaces] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
@@ -92,21 +134,40 @@ export default function PeoplePage() {
     [people, selectedPersonId],
   );
   const viewerContextIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
+  const selectedPersonName = selectedDetails?.person.name || selectedPerson?.name || "No person selected";
+  const groupedPhotos = useMemo(() => {
+    const sorted = [...photos].sort((a, b) => {
+      const dateA = new Date(a.takenAt || a.createdAt).getTime();
+      const dateB = new Date(b.takenAt || b.createdAt).getTime();
+      return dateB - dateA;
+    });
 
-  const clearAlerts = () => {
+    const groups: Array<{ title: string; photos: Photo[] }> = [];
+    sorted.forEach((photo) => {
+      const date = new Date(photo.takenAt || photo.createdAt);
+      const title = formatDateHeader(date);
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup?.title === title) lastGroup.photos.push(photo);
+      else groups.push({ title, photos: [photo] });
+    });
+    return groups;
+  }, [photos]);
+
+  const clearAlerts = useCallback(() => {
     setMessage(null);
     setError(null);
-  };
+  }, []);
 
-  const loadPeople = useCallback(async () => {
-    setLoadingPeople(true);
+  const loadPeople = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingPeople(peoplePageSnapshot.people.length === 0);
     clearAlerts();
     try {
-      const res = await fetch("/api/people?size=300");
+      const res = await fetch("/api/people?size=300", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to load people"));
 
       const next = Array.isArray(data?.people) ? (data.people as PersonItem[]) : [];
+      peoplePageSnapshot.people = next;
       setPeople(next);
 
       setSelectedPersonId((prev) => {
@@ -124,15 +185,16 @@ export default function PeoplePage() {
     } finally {
       setLoadingPeople(false);
     }
-  }, [selectedPersonIdParam]);
+  }, [clearAlerts, selectedPersonIdParam]);
 
-  const loadUnassigned = useCallback(async () => {
-    setLoadingUnassigned(true);
+  const loadUnassigned = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoadingUnassigned(peoplePageSnapshot.unassignedFaces.length === 0);
     try {
-      const res = await fetch("/api/faces/unassigned?limit=80");
+      const res = await fetch("/api/faces/unassigned?limit=80", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to load unassigned faces"));
       const nextFaces = Array.isArray(data?.faces) ? (data.faces as UnassignedFace[]) : [];
+      peoplePageSnapshot.unassignedFaces = nextFaces;
       setUnassignedFaces(nextFaces);
       setSelectedFaceIds((prev) => prev.filter((id) => nextFaces.some((face) => face.faceId === id)));
     } catch (err) {
@@ -140,11 +202,65 @@ export default function PeoplePage() {
     } finally {
       setLoadingUnassigned(false);
     }
-  }, []);
+  }, [clearAlerts]);
+
+  const loadPersonData = useCallback(async (personId: string, options?: { silent?: boolean }) => {
+    if (!personId) {
+      setSelectedDetails(null);
+      setPhotos([]);
+      setPhotosTotal(0);
+      return;
+    }
+
+    const requestId = personLoadRequest.current + 1;
+    personLoadRequest.current = requestId;
+    const cached = peoplePageSnapshot.byPerson[personId];
+    if (cached) {
+      setSelectedDetails(cached.details);
+      setNameDraft(String(cached.details?.person?.name || ""));
+      setPhotos(cached.photos);
+      setPhotosTotal(cached.total);
+      if (options?.silent) {
+        setLoadingPersonData(false);
+      }
+    }
+
+    if (!options?.silent) setLoadingPersonData(!cached);
+    clearAlerts();
+    try {
+      const [detailRes, photosRes] = await Promise.all([
+        fetch(`/api/people/${personId}`, { cache: "no-store" }),
+        fetch(`/api/people/${personId}/photos?limit=120&offset=0`, { cache: "no-store" }),
+      ]);
+
+      const detailData = await detailRes.json().catch(() => ({}));
+      const photosData = await photosRes.json().catch(() => ({}));
+      if (!detailRes.ok) throw new Error(String(detailData?.error || "Failed to load person details"));
+      if (!photosRes.ok) throw new Error(String(photosData?.error || "Failed to load person photos"));
+
+      const next = {
+        details: detailData as PersonDetails,
+        photos: Array.isArray(photosData?.photos) ? photosData.photos : [],
+        total: Number(photosData?.total || 0),
+      };
+
+      if (personLoadRequest.current !== requestId) return;
+      peoplePageSnapshot.byPerson[personId] = next;
+      setSelectedDetails(next.details);
+      setNameDraft(String(next.details?.person?.name || ""));
+      setPhotos(next.photos);
+      setPhotosTotal(next.total);
+      setBulkPersonId((prev) => prev || personId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load person data");
+    } finally {
+      setLoadingPersonData(false);
+    }
+  }, [clearAlerts]);
 
   useEffect(() => {
-    void loadPeople();
-    void loadUnassigned();
+    void loadPeople({ silent: peoplePageSnapshot.people.length > 0 });
+    void loadUnassigned({ silent: peoplePageSnapshot.unassignedFaces.length > 0 });
   }, [loadPeople, loadUnassigned]);
 
   useEffect(() => {
@@ -152,42 +268,37 @@ export default function PeoplePage() {
       setSelectedDetails(null);
       setPhotos([]);
       setPhotosTotal(0);
+      setBulkPersonId("");
       return;
     }
 
-    let cancelled = false;
-    const loadPersonData = async () => {
-      setLoadingPersonData(true);
-      clearAlerts();
-      try {
-        const [detailRes, photosRes] = await Promise.all([
-          fetch(`/api/people/${selectedPersonId}`),
-          fetch(`/api/people/${selectedPersonId}/photos?limit=120&offset=0`),
-        ]);
+    peoplePageSnapshot.selectedPersonId = selectedPersonId;
+    setBulkPersonId(selectedPersonId);
+    void loadPersonData(selectedPersonId, { silent: !!peoplePageSnapshot.byPerson[selectedPersonId] });
+  }, [loadPersonData, selectedPersonId]);
 
-        const detailData = await detailRes.json().catch(() => ({}));
-        const photosData = await photosRes.json().catch(() => ({}));
-        if (!detailRes.ok) throw new Error(String(detailData?.error || "Failed to load person details"));
-        if (!photosRes.ok) throw new Error(String(photosData?.error || "Failed to load person photos"));
+  const syncAll = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await Promise.all([
+        loadPeople(),
+        loadUnassigned(),
+        selectedPersonId ? loadPersonData(selectedPersonId) : Promise.resolve(),
+      ]);
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadPeople, loadPersonData, loadUnassigned, selectedPersonId, syncing]);
 
-        if (cancelled) return;
-        setSelectedDetails(detailData as PersonDetails);
-        setNameDraft(String(detailData?.person?.name || ""));
-        setPhotos(Array.isArray(photosData?.photos) ? photosData.photos : []);
-        setPhotosTotal(Number(photosData?.total || 0));
-        setBulkPersonId((prev) => prev || selectedPersonId);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load person data");
-      } finally {
-        if (!cancelled) setLoadingPersonData(false);
-      }
-    };
-
-    void loadPersonData();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedPersonId]);
+  useHeaderSyncAction(useMemo(() => ({
+    label: "Sync",
+    loading: syncing,
+    onClick: () => {
+      void syncAll();
+    },
+    ariaLabel: "Sync people and faces",
+  }), [syncAll, syncing]));
 
   const savePersonName = async () => {
     if (!selectedPersonId || savingName) return;
@@ -222,6 +333,21 @@ export default function PeoplePage() {
           name: data.person?.name || trimmed,
         },
       } : prev);
+      if (peoplePageSnapshot.byPerson[selectedPersonId]) {
+        peoplePageSnapshot.byPerson[selectedPersonId] = {
+          ...peoplePageSnapshot.byPerson[selectedPersonId],
+          details: peoplePageSnapshot.byPerson[selectedPersonId].details ? {
+            ...peoplePageSnapshot.byPerson[selectedPersonId].details!,
+            person: {
+              ...peoplePageSnapshot.byPerson[selectedPersonId].details!.person,
+              name: data.person?.name || trimmed,
+            },
+          } : null,
+        };
+      }
+      peoplePageSnapshot.people = peoplePageSnapshot.people.map((person) => (
+        person.id === selectedPersonId ? { ...person, name: data.person?.name || trimmed } : person
+      ));
       setMessage("Person renamed.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update person");
@@ -246,7 +372,7 @@ export default function PeoplePage() {
 
       setMergeSourceId("");
       setMessage("People merged.");
-      await Promise.all([loadPeople(), loadUnassigned()]);
+      await Promise.all([loadPeople(), loadUnassigned(), loadPersonData(selectedPersonId)]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to merge people");
     } finally {
@@ -283,7 +409,13 @@ export default function PeoplePage() {
       const failedCount = Array.isArray(data?.failed) ? data.failed.length : 0;
       setMessage(failedCount ? `Assigned ${assigned}; ${failedCount} failed.` : `Assigned ${assigned} face(s).`);
       setSelectedFaceIds((prev) => prev.filter((id) => !faceIds.includes(id)));
-      await Promise.all([loadUnassigned(), loadPeople()]);
+      await Promise.all([
+        loadUnassigned(),
+        loadPeople(),
+        targetPersonId && targetPersonId === selectedPersonId
+          ? loadPersonData(targetPersonId, { silent: false })
+          : Promise.resolve(),
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to assign faces");
     } finally {
@@ -291,45 +423,44 @@ export default function PeoplePage() {
     }
   };
 
+  const handleSelectPerson = useCallback((personId: string) => {
+    setSelectedPersonId(personId);
+    setToolsOpen(false);
+  }, []);
+
+  const handleToggleTools = useCallback((personId: string) => {
+    setSelectedPersonId(personId);
+    setToolsOpen((open) => (selectedPersonId === personId ? !open : true));
+  }, [selectedPersonId]);
+
   return (
     <div className="page-shell">
-      <div style={{ marginBottom: "1.1rem" }}>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontStyle: "italic",
-            fontSize: "clamp(1.75rem, 5vw, 2.5rem)",
-            fontWeight: 700,
-            letterSpacing: "-0.02em",
-            lineHeight: 1.1,
-          }}
-        >
-          People
-        </h1>
-        <p style={{ color: "var(--muted)", fontSize: "0.95rem", marginTop: "0.5rem" }}>
-          Manage names, merges, and unassigned faces
-        </p>
-      </div>
+      <PageHeader title="People" />
+
+      {syncing && (people.length > 0 || unassignedFaces.length > 0) && (
+        <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
+          Pulling the latest people and face groups.
+        </div>
+      )}
 
       {error && (
-        <div className="panel" style={{ marginBottom: "0.8rem", borderColor: "var(--error)", color: "var(--error)" }}>
+        <div className="status-banner error" style={{ marginBottom: "0.8rem" }}>
           <div style={{ display: "grid", gap: "0.5rem" }}>
             <span>{error}</span>
             <button
               className="btn btn-secondary btn-sm"
               style={{ width: "fit-content" }}
               onClick={() => {
-                void loadPeople();
-                void loadUnassigned();
+                void syncAll();
               }}
             >
-              Retry
+              Sync again
             </button>
           </div>
         </div>
       )}
       {message && (
-        <div className="panel" style={{ marginBottom: "0.8rem", color: "var(--ink-2)" }}>
+        <div className="status-banner success" style={{ marginBottom: "0.8rem", color: "var(--ink-2)" }}>
           {message}
         </div>
       )}
@@ -362,212 +493,247 @@ export default function PeoplePage() {
           </div>
         </div>
       ) : (
-        <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(106px, 1fr))", gap: "0.75rem", marginBottom: "1rem" }}>
+        <div className="section-stack">
+          <section className="panel stack-md">
+            <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <p className="section-heading">People</p>
+              <span className="info-chip">{people.length}</span>
+            </div>
+
+            <div className="people-strip" role="list" aria-label="People">
             {people.map((person) => {
               const active = selectedPersonId === person.id;
               return (
-                <button
+                <div
                   key={person.id}
-                  type="button"
-                  onClick={() => setSelectedPersonId(person.id)}
-                  style={{
-                    border: active ? "2px solid var(--accent)" : "1px solid var(--line)",
-                    borderRadius: "var(--r-md)",
-                    background: "var(--bg-elevated)",
-                    padding: "0.5rem",
-                    display: "grid",
-                    gap: "0.45rem",
-                    textAlign: "left",
-                  }}
+                  className={`people-strip-card glass${active ? " active" : ""}`}
+                  style={{ borderRadius: 'var(--r-xl)', padding: '8px', border: 'none' }}
+                  role="listitem"
                 >
-                  <img
-                    src={person.thumbnailUrl}
-                    alt={person.name}
-                    style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: "var(--r-sm)" }}
-                  />
-                  <span style={{ fontSize: "0.8rem", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {person.name}
-                  </span>
-                </button>
+                  <div className="people-strip-avatar-wrap">
+                    <button
+                      type="button"
+                      className="people-strip-select"
+                      onClick={() => handleSelectPerson(person.id)}
+                      aria-pressed={active}
+                      aria-label={`Show ${person.name}`}
+                    >
+                      <img
+                        src={person.thumbnailUrl}
+                        alt={person.name}
+                        className="people-strip-avatar"
+                      />
+                    </button>
+                    {active && (
+                      <button
+                        type="button"
+                        className={`people-strip-settings${toolsOpen ? " active" : ""}`}
+                        onClick={() => handleToggleTools(person.id)}
+                        aria-label={`${toolsOpen ? "Close" : "Open"} settings for ${person.name}`}
+                      >
+                        <Settings2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="people-strip-name-button"
+                    onClick={() => handleSelectPerson(person.id)}
+                  >
+                    <span className="people-strip-name">{person.name}</span>
+                  </button>
+                </div>
               );
             })}
-          </div>
+            </div>
+          </section>
 
-          <div className="panel" style={{ marginBottom: "1rem", display: "grid", gap: "0.75rem" }}>
-            <p className="section-heading">Person Manager</p>
-
+          <section className="panel stack-md">
             {loadingPersonData ? (
-              <div className="empty-state" style={{ minHeight: 120 }}>
+              <div className="empty-state" style={{ minHeight: 160 }}>
                 <Loader size={22} className="spin" color="var(--accent)" />
               </div>
             ) : selectedPerson ? (
-              <>
-                <div style={{ display: "grid", gridTemplateColumns: "86px minmax(0,1fr)", gap: "0.8rem", alignItems: "center" }}>
-                  <img
-                    src={selectedPerson.thumbnailUrl}
-                    alt={selectedPerson.name}
-                    style={{ width: 86, height: 86, borderRadius: "var(--r-md)", objectFit: "cover", border: "1px solid var(--line)" }}
-                  />
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <p style={{ fontWeight: 700 }}>{selectedDetails?.person.name || selectedPerson.name}</p>
-                    <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-                      Assets: {selectedDetails?.stats.assets ?? photosTotal}
-                    </p>
-                    <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-                      Recent loaded: {photos.length}
-                    </p>
+              toolsOpen ? (
+                <div className="stack-md">
+                  <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                    <div className="stack-xs">
+                      <p className="section-heading">{selectedPersonName}</p>
+                      <p className="muted-copy">{selectedDetails?.stats.assets ?? photosTotal} items</p>
+                    </div>
+                    <span className="info-chip">Settings</span>
+                  </div>
+
+                  <div className="split-input-row">
+                    <input
+                      className="input"
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      placeholder="Rename person"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void savePersonName();
+                      }}
+                    />
+                    <button className="btn btn-primary" onClick={savePersonName} disabled={savingName || !nameDraft.trim()}>
+                      {savingName ? <Loader size={14} className="spin" /> : "Save name"}
+                    </button>
+                  </div>
+
+                  <div className="split-input-row">
+                    <select className="input" value={mergeSourceId} onChange={(event) => setMergeSourceId(event.target.value)}>
+                      <option value="">Merge another person into {selectedPersonName}</option>
+                      {people.filter((person) => person.id !== selectedPersonId).map((person) => (
+                        <option key={person.id} value={person.id}>
+                          {person.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn btn-secondary" onClick={mergeIntoSelected} disabled={merging || !mergeSourceId}>
+                      {merging ? <Loader size={14} className="spin" /> : "Merge"}
+                    </button>
                   </div>
                 </div>
+              ) : (
+                <>
+                  <div className="people-panel-switcher" role="tablist" aria-label="Person views">
+                    <button
+                      type="button"
+                      className={`people-panel-tab${activePanel === "timeline" ? " active" : ""}`}
+                      onClick={() => setActivePanel("timeline")}
+                      aria-label={`Show ${selectedPersonName} timeline`}
+                      aria-pressed={activePanel === "timeline"}
+                    >
+                      <Images size={16} />
+                      <span className="people-panel-tab-count">{photosTotal}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`people-panel-tab${activePanel === "unassigned" ? " active" : ""}`}
+                      onClick={() => setActivePanel("unassigned")}
+                      aria-label={`Show unassigned faces for ${selectedPersonName}`}
+                      aria-pressed={activePanel === "unassigned"}
+                    >
+                      <ScanFace size={16} />
+                      <span className="people-panel-tab-count">{unassignedFaces.length}</span>
+                    </button>
+                  </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "0.55rem" }}>
-                  <input
-                    className="input"
-                    value={nameDraft}
-                    onChange={(event) => setNameDraft(event.target.value)}
-                    placeholder="Rename person"
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void savePersonName();
-                    }}
-                  />
-                  <button className="btn btn-primary" onClick={savePersonName} disabled={savingName || !nameDraft.trim()}>
-                    {savingName ? <Loader size={14} className="spin" /> : "Save Name"}
-                  </button>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "0.55rem" }}>
-                  <select className="input" value={mergeSourceId} onChange={(event) => setMergeSourceId(event.target.value)}>
-                    <option value="">Select duplicate person to merge into this</option>
-                    {people.filter((person) => person.id !== selectedPersonId).map((person) => (
-                      <option key={person.id} value={person.id}>
-                        {person.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="btn btn-secondary" onClick={mergeIntoSelected} disabled={merging || !mergeSourceId}>
-                    {merging ? <Loader size={14} className="spin" /> : "Merge"}
-                  </button>
-                </div>
-              </>
-            ) : null}
-          </div>
-
-          <div className="panel" style={{ marginBottom: "1rem", display: "grid", gap: "0.7rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-              <p className="section-heading">Unassigned Faces Inbox</p>
-              <button className="btn btn-ghost btn-sm" onClick={() => void loadUnassigned()} disabled={loadingUnassigned || assigningFaces}>
-                Refresh
-              </button>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "0.55rem" }}>
-              <select className="input" value={bulkPersonId} onChange={(event) => setBulkPersonId(event.target.value)}>
-                <option value="">Choose target person</option>
-                {people.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="btn btn-primary"
-                onClick={() => void assignFaces(selectedFaceIds)}
-                disabled={assigningFaces || !bulkPersonId || selectedFaceIds.length === 0}
-              >
-                {assigningFaces ? <Loader size={14} className="spin" /> : `Assign Selected (${selectedFaceIds.length})`}
-              </button>
-            </div>
-
-            {loadingUnassigned ? (
-              <div className="empty-state" style={{ minHeight: 140 }}>
-                <Loader size={22} className="spin" color="var(--accent)" />
-              </div>
-            ) : unassignedFaces.length === 0 ? (
-              <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>No unassigned faces right now.</p>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: "0.65rem" }}>
-                {unassignedFaces.map((face, index) => {
-                  const checked = selectedFaceIds.includes(face.faceId);
-                  return (
-                    <div key={face.faceId} style={{ border: "1px solid var(--line)", borderRadius: "var(--r-sm)", padding: "0.45rem", display: "grid", gap: "0.45rem" }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.78rem", color: "var(--muted)", cursor: "pointer" }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleFace(face.faceId)}
-                        />
-                        Face #{index + 1}
-                      </label>
-
-                      <div style={{ position: "relative", borderRadius: "var(--r-sm)", overflow: "hidden", border: "1px solid var(--line)" }}>
-                        <img src={face.assetThumbUrl} alt={face.filename} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
-                        <div
-                          style={{
-                            position: "absolute",
-                            border: "2px solid var(--accent)",
-                            background: "color-mix(in srgb, var(--accent) 18%, transparent)",
-                            pointerEvents: "none",
-                            ...buildFaceBoxStyle(face),
-                          }}
-                        />
+                  {activePanel === "timeline" ? (
+                    photos.length === 0 ? (
+                      <div className="empty-state" style={{ minHeight: 170 }}>
+                        <p className="empty-state-title">No photos for this person</p>
+                      </div>
+                    ) : (
+                      <div className="stack-lg">
+                        {groupedPhotos.map((group) => (
+                          <div key={group.title} className="stack-sm">
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 4px" }}>
+                              <h2 style={{ fontSize: "0.96rem", fontWeight: 700, color: "var(--ink-2)" }}>{group.title}</h2>
+                              <span className="info-chip">{group.photos.length}</span>
+                            </div>
+                            <div className="responsive-grid">
+                              {group.photos.map((photo) => (
+                                <button
+                                  key={photo.id}
+                                  type="button"
+                                  onClick={() => {
+                                    safeSessionStorageSet("current_gallery_context", JSON.stringify(viewerContextIds));
+                                    router.push(`/photo/${photo.id}`);
+                                  }}
+                                  style={{ border: "none", background: "transparent", padding: 0, borderRadius: "var(--r-sm)", overflow: "hidden" }}
+                                >
+                                  <img
+                                    src={photo.thumbUrl || photo.url}
+                                    alt={photo.filename}
+                                    style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  ) : loadingUnassigned ? (
+                    <div className="empty-state" style={{ minHeight: 140 }}>
+                      <Loader size={22} className="spin" color="var(--accent)" />
+                    </div>
+                  ) : unassignedFaces.length === 0 ? (
+                    <p className="muted-copy">No unassigned faces right now.</p>
+                  ) : (
+                    <div className="stack-md">
+                      <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                        <p className="section-heading">Assign to {selectedPersonName}</p>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => void assignFaces(selectedFaceIds)}
+                          disabled={assigningFaces || !selectedPersonId || selectedFaceIds.length === 0}
+                        >
+                          {assigningFaces ? <Loader size={14} className="spin" /> : `Assign selected (${selectedFaceIds.length})`}
+                        </button>
                       </div>
 
-                      <p style={{ fontSize: "0.74rem", color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {face.filename}
-                      </p>
+                      <div className="media-card-grid">
+                        {unassignedFaces.map((face, index) => {
+                          const checked = selectedFaceIds.includes(face.faceId);
+                          return (
+                            <div key={face.faceId} className="media-card">
+                              <label style={{ display: "flex", alignItems: "center", gap: "0.45rem", fontSize: "0.78rem", color: "var(--muted)", cursor: "pointer" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleFace(face.faceId)}
+                                />
+                                Face #{index + 1}
+                              </label>
 
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.4rem" }}>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => router.push(`/photo/${face.assetId}`)}
-                        >
-                          Open
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => void assignFaces([face.faceId])}
-                          disabled={assigningFaces || !bulkPersonId}
-                        >
-                          Assign
-                        </button>
+                              <div className="media-card-thumb-wrap">
+                                <img src={face.assetThumbUrl} alt={face.filename} className="media-card-thumb" />
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    border: "2px solid var(--accent)",
+                                    background: "color-mix(in srgb, var(--accent) 18%, transparent)",
+                                    pointerEvents: "none",
+                                    ...buildFaceBoxStyle(face),
+                                  }}
+                                />
+                              </div>
+
+                              <p style={{ fontSize: "0.76rem", color: "var(--muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {face.filename}
+                              </p>
+
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.45rem" }}>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  onClick={() => router.push(`/photo/${face.assetId}`)}
+                                >
+                                  Open
+                                </button>
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => void assignFaces([face.faceId])}
+                                  disabled={assigningFaces || !selectedPersonId}
+                                >
+                                  Assign
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                  );
-                })}
+                  )}
+                </>
+              )
+            ) : (
+              <div className="empty-state" style={{ minHeight: 170 }}>
+                <p className="muted-copy">Pick a person above to load their photos.</p>
               </div>
             )}
-          </div>
-
-          {loadingPersonData ? (
-            <div className="empty-state" style={{ minHeight: 160 }}>
-              <Loader size={22} className="spin" color="var(--accent)" />
-            </div>
-          ) : photos.length === 0 ? (
-            <div className="empty-state" style={{ minHeight: 170 }}>
-              <p className="empty-state-title">No photos for this person</p>
-            </div>
-          ) : (
-            <div className="responsive-grid">
-              {photos.map((photo) => (
-                <button
-                  key={photo.id}
-                  type="button"
-                  onClick={() => {
-                    sessionStorage.setItem("current_gallery_context", JSON.stringify(viewerContextIds));
-                    router.push(`/photo/${photo.id}`);
-                  }}
-                  style={{ border: "none", background: "transparent", padding: 0, borderRadius: "var(--r-sm)", overflow: "hidden" }}
-                >
-                  <img
-                    src={photo.thumbUrl || photo.url}
-                    alt={photo.filename}
-                    style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }}
-                  />
-                </button>
-              ))}
-            </div>
-          )}
-        </>
+          </section>
+        </div>
       )}
     </div>
   );

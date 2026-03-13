@@ -4,6 +4,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Clock, Loader, Search, User, X } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import {
+  safeLocalStorageGet,
+  safeLocalStorageRemove,
+  safeLocalStorageSet,
+  safeSessionStorageSet,
+} from "@/lib/browser-storage";
 import type { Photo } from "@/lib/photo-cache";
 
 const RECENT_KEY = "vpics_recent_searches";
@@ -32,7 +39,7 @@ export default function SearchContent() {
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[];
+      const saved = JSON.parse(safeLocalStorageGet(RECENT_KEY) ?? "[]") as string[];
       setRecents(saved);
     } catch {
       setRecents([]);
@@ -44,7 +51,7 @@ export default function SearchContent() {
     const trimmed = q.trim();
     const next = [trimmed, ...recents.filter((r) => r !== trimmed)].slice(0, 8);
     setRecents(next);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    safeLocalStorageSet(RECENT_KEY, JSON.stringify(next));
     setQuery(trimmed);
     router.push(`/search?q=${encodeURIComponent(trimmed)}`);
   };
@@ -90,13 +97,17 @@ export default function SearchContent() {
 
   return (
     <div className="page-shell">
-      <form onSubmit={handleSubmit} style={{ marginBottom: "1.5rem" }}>
-        <div className="search-page-bar" style={{ padding: "0.85rem 1.25rem" }}>
-          <Search size={22} strokeWidth={2} className="search-page-bar-icon" />
+      <PageHeader
+        title="Search"
+      />
+
+      <form onSubmit={handleSubmit} style={{ marginBottom: "2rem" }}>
+        <div className="search-page-bar glass" style={{ padding: "1rem 1.5rem", borderRadius: 'var(--r-xl)', border: 'none' }}>
+          <Search size={22} strokeWidth={2.5} className="search-page-bar-icon" style={{ color: 'var(--accent)' }} />
           <input
             type="text"
             placeholder="Search photos, people, places..."
-            style={{ fontSize: "1.05rem" }}
+            style={{ fontSize: "1.1rem", fontWeight: 500 }}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search"
@@ -110,7 +121,7 @@ export default function SearchContent() {
                 router.push("/search");
               }}
             >
-              <X size={18} strokeWidth={2.5} />
+              <X size={20} strokeWidth={2.5} />
             </button>
           )}
         </div>
@@ -118,7 +129,7 @@ export default function SearchContent() {
 
       {activeQuery ? (
         <div style={{ display: "grid", gap: "1rem" }}>
-          <p style={{ color: "var(--muted)", fontSize: "0.88rem" }}>
+          <p className="muted-copy">
             Results for <strong style={{ color: "var(--ink)" }}>&ldquo;{activeQuery}&rdquo;</strong>
             {!result.smartSearchAvailable && " (fallback metadata mode)"}
           </p>
@@ -147,24 +158,17 @@ export default function SearchContent() {
           {!loading && result.people.length > 0 && (
             <div>
               <p className="section-heading" style={{ marginBottom: "0.65rem" }}>People</p>
-              <div style={{ display: "flex", gap: "0.6rem", overflowX: "auto", paddingBottom: "0.2rem" }}>
+              <div className="search-people-row">
                 {result.people.map((person) => (
                   <button
                     key={person.id}
                     type="button"
                     onClick={() => router.push(`/people?personId=${encodeURIComponent(person.id)}`)}
-                    style={{
-                      border: "1px solid var(--line)",
-                      borderRadius: "var(--r-md)",
-                      background: "var(--bg-elevated)",
-                      padding: "0.45rem",
-                      minWidth: 92,
-                      display: "grid",
-                      gap: "0.35rem",
-                    }}
+                    className="entity-card"
+                    style={{ minWidth: 110 }}
                   >
-                    <img src={person.thumbnailUrl} alt={person.name} style={{ width: "100%", aspectRatio: "1", borderRadius: "var(--r-sm)", objectFit: "cover" }} />
-                    <span style={{ fontSize: "0.75rem", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{person.name}</span>
+                    <img src={person.thumbnailUrl} alt={person.name} className="entity-card-thumb" />
+                    <span className="entity-card-title">{person.name}</span>
                   </button>
                 ))}
               </div>
@@ -179,7 +183,7 @@ export default function SearchContent() {
                   type="button"
                   style={{ border: "none", background: "transparent", padding: 0, borderRadius: "var(--r-sm)", overflow: "hidden" }}
                   onClick={() => {
-                    sessionStorage.setItem("current_gallery_context", JSON.stringify(contextIds));
+                    safeSessionStorageSet("current_gallery_context", JSON.stringify(contextIds));
                     router.push(`/photo/${photo.id}`);
                   }}
                 >
@@ -217,7 +221,7 @@ export default function SearchContent() {
               className="btn btn-ghost btn-sm"
               onClick={() => {
                 setRecents([]);
-                localStorage.removeItem(RECENT_KEY);
+                safeLocalStorageRemove(RECENT_KEY);
               }}
             >
               Clear recent searches

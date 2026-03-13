@@ -3,7 +3,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader, RotateCcw, Trash2 } from "lucide-react";
+import { Loader, RotateCcw, Trash2 } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { safeSessionStorageSet } from "@/lib/browser-storage";
+import { navigateBackOr } from "@/lib/navigation";
 import type { Photo } from "@/lib/photo-cache";
 
 export default function TrashPage() {
@@ -113,21 +116,14 @@ export default function TrashPage() {
 
   return (
     <div className="page-shell">
-      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", marginBottom: "1rem" }}>
-        <button className="btn btn-icon btn-secondary" onClick={() => router.back()} aria-label="Back">
-          <ArrowLeft size={17} />
-        </button>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.5rem", fontWeight: 700 }}>
-            Trash
-          </h1>
-          <p style={{ color: "var(--muted)", fontSize: "0.86rem", marginTop: "0.2rem" }}>
-            Soft-deleted assets from Immich
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Trash"
+        kicker="Recovery"
+        onBack={() => navigateBackOr(router, "/")}
+        meta={null}
+      />
 
-      <div style={{ display: "flex", gap: "0.55rem", marginBottom: "1rem", flexWrap: "wrap" }}>
+      <div className="glass action-row" style={{ marginBottom: "1.5rem", padding: "1rem", borderRadius: "16px", border: 'none' }}>
         <button className="btn btn-secondary btn-sm" onClick={restoreAll} disabled={busy || photos.length === 0}>
           <RotateCcw size={14} />
           Restore All
@@ -174,7 +170,7 @@ export default function TrashPage() {
                     toggleSelect(photo.id);
                     return;
                   }
-                  sessionStorage.setItem("current_gallery_context", JSON.stringify(contextIds));
+                  safeSessionStorageSet("current_gallery_context", JSON.stringify(contextIds));
                   router.push(`/photo/${photo.id}`);
                 }}
                 onContextMenu={(event) => {

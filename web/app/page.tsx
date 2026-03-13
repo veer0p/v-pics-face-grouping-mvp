@@ -6,12 +6,18 @@ import { useSearchParams, useRouter } from "next/navigation";
 import {
     FolderPlus, Loader, RefreshCw, Trash2, X, Check, Heart, CloudCheck, Play,
 } from "lucide-react";
-import { PhotoMetadataCache, VideoBlobCache, type Photo } from "@/lib/photo-cache";
+import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
 import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
 import { useNetwork } from "@/components/NetworkContext";
+import { PageHeader } from "@/components/PageHeader";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
+import { safeSessionStorageSet } from "@/lib/browser-storage";
 
 const PAGE_SIZE = 40;
+const POST_UPLOAD_REFRESH_DELAY_MS = 1200;
+
+let homeFeedSnapshot: { photos: Photo[]; hasMore: boolean } | null = null;
 
 type LocalGalleryPhoto = {
     kind: "local";
@@ -65,11 +71,11 @@ export default function HomePage() {
     const filter = (searchParams.get("filter") as "all" | "favorites") || "all";
     const forceFreshLoad = searchParams.get("fresh") === "1";
 
-    const [photos, setPhotos] = useState<Photo[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [photos, setPhotos] = useState<Photo[]>(() => homeFeedSnapshot?.photos ?? []);
+    const [loading, setLoading] = useState(() => !(homeFeedSnapshot?.photos.length));
     const [loadingMore, setLoadingMore] = useState(false);
-    const [refreshing, setRefreshing] = useState(false);
-    const [hasMore, setHasMore] = useState(true);
+    const [syncing, setSyncing] = useState(false);
+    const [hasMore, setHasMore] = useState(() => homeFeedSnapshot?.hasMore ?? true);
     const [error, setError] = useState<string | null>(null);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [deleting, setDeleting] = useState(false);
@@ -83,8 +89,31 @@ export default function HomePage() {
     const observerRef = useRef<HTMLDivElement>(null);
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const longPressTriggered = useRef(false);
+    const photoCountRef = useRef(homeFeedSnapshot?.photos.length ?? 0);
 
     const selectMode = selected.size > 0;
+
+    const applyPhotoPage = useCallback((nextPhotos: Photo[], append: boolean) => {
+        if (append) {
+            setPhotos((prev) => [...prev, ...nextPhotos]);
+        } else {
+            setPhotos(nextPhotos);
+        }
+        setHasMore(nextPhotos.length === PAGE_SIZE);
+    }, []);
+
+    const tryLoadCachedPage = useCallback(async (
+        offset: number,
+        append: boolean,
+        fallbackMessage?: string | null,
+    ) => {
+        const cached = await PhotoMetadataCache.get(offset);
+        if (!cached) return false;
+
+        applyPhotoPage(cached, append);
+        setError(fallbackMessage ?? null);
+        return true;
+    }, [applyPhotoPage]);
 
     const clearLongPress = useCallback(() => {
         if (longPressTimer.current) {
@@ -116,89 +145,113 @@ export default function HomePage() {
     const fetchPhotos = useCallback(async (
         offset = 0,
         append = false,
-        options?: { forceNetwork?: boolean }
+        options?: { forceNetwork?: boolean; silent?: boolean }
     ) => {
         const forceNetwork = !!options?.forceNetwork;
-        if (!navigator.onLine) {
-            // Offline — skip API calls, just show cached/local photos
-            setLoading(false);
-            setLoadingMore(false);
-            return;
+        const silent = !!options?.silent;
+        if (offset === 0) {
+            if (!silent && photoCountRef.current === 0) setLoading(true);
         }
-        if (offset === 0) setLoading(true);
         else setLoadingMore(true);
         setError(null);
 
         try {
-            // 1. Smart Cache Check (Async IndexedDB)
-            const localHash = await PhotoMetadataCache.getHash();
-            const cached = await PhotoMetadataCache.get(offset);
-
-            if (offset === 0 && forceNetwork) {
-                await PhotoMetadataCache.clear();
-                await PhotoMetadataCache.setHash("");
+            if (!navigator.onLine && !forceNetwork) {
+                const restored = await tryLoadCachedPage(
+                    offset,
+                    append,
+                    "You are offline. Showing cached photos.",
+                );
+                if (restored) return;
+                throw new Error("You are offline and no cached photos are available.");
             }
 
-            if (offset === 0 && localHash && !refreshing && !forceNetwork) {
-                // Check if collection has changed via server-side hash
-                const checkRes = await fetch(`/api/photos?hash=${localHash}&limit=${PAGE_SIZE}&offset=0`);
-                const data = await checkRes.json();
-
-                if (data.match) {
-                    console.log("✅ Cached (Hash matched, skipping DB query)");
-                    if (cached) {
-                        setPhotos(cached);
-                        setHasMore(cached.length === PAGE_SIZE);
-                        setLoading(false);
-                        return;
-                    }
-                }
-            } else if (offset > 0 && cached && localHash) {
-                // For paged scrolls, if we have common hash, we can trust the cache
-                console.log(`✅ Cached (Offset ${offset})`);
-                setPhotos((prev) => [...prev, ...cached]);
-                setHasMore(cached.length === PAGE_SIZE);
-                setLoadingMore(false);
-                return;
-            }
-
-            // 2. Network Fetch (Cache miss or Hash mismatch)
-            const hashForRequest = forceNetwork ? "" : (localHash || "");
-            const url = `/api/photos?limit=${PAGE_SIZE}&offset=${offset}&hash=${hashForRequest}`;
-            const res = await fetch(url);
+            const res = await fetch(`/api/photos?limit=${PAGE_SIZE}&offset=${offset}`, {
+                cache: "no-store",
+            });
             if (!res.ok) throw new Error("Failed to fetch photos");
             const data = await res.json();
 
-            // If we get a new hash, we should ideally clear old cached pages 
-            // because the sequence might have changed (new uploads/deletes)
-            if (offset === 0 && data.hash && data.hash !== localHash) {
-                console.warn("🔄 Hash mismatch, refreshing collection...");
-                await PhotoMetadataCache.clear();
-                await PhotoMetadataCache.setHash(data.hash);
-            }
-
             const newPhotos: Photo[] = data.photos || [];
-            if (append) {
-                setPhotos((prev) => [...prev, ...newPhotos]);
-            } else {
-                setPhotos(newPhotos);
-            }
+            applyPhotoPage(newPhotos, append);
 
-            // 3. Update Cache
-            await PhotoMetadataCache.set(offset, newPhotos);
-            setHasMore(newPhotos.length === PAGE_SIZE);
+            void (async () => {
+                if (offset === 0) {
+                    if (forceNetwork) {
+                        await PhotoMetadataCache.clear();
+                    }
+                    if (typeof data.hash === "string" && data.hash) {
+                        await PhotoMetadataCache.setHash(data.hash);
+                    }
+                }
+                await PhotoMetadataCache.set(offset, newPhotos);
+            })();
         } catch (err) {
-            console.error("[Gallery] Fetch error:", err);
-            setError(err instanceof Error ? err.message : "Failed to fetch photos");
+            const restored = await tryLoadCachedPage(
+                offset,
+                append,
+                navigator.onLine ? "Live refresh failed. Showing cached photos." : "You are offline. Showing cached photos.",
+            );
+            if (!restored) {
+                console.error("[Gallery] Fetch error:", err);
+                setError(err instanceof Error ? err.message : "Failed to fetch photos");
+            }
         } finally {
-            setLoading(false);
+            if (!silent || offset !== 0) {
+                setLoading(false);
+            }
             setLoadingMore(false);
         }
-    }, [refreshing]);
+    }, [applyPhotoPage, tryLoadCachedPage]);
+
+    const syncLatest = useCallback(async () => {
+        if (syncing) return;
+        setSyncing(true);
+        try {
+            await fetchPhotos(0, false, { forceNetwork: true, silent: photos.length > 0 });
+        } finally {
+            setSyncing(false);
+        }
+    }, [fetchPhotos, photos.length, syncing]);
 
     useEffect(() => {
-        fetchPhotos(0, false, { forceNetwork: forceFreshLoad });
-    }, [fetchPhotos, filter, forceFreshLoad]);
+        photoCountRef.current = photos.length;
+    }, [photos.length]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const bootstrap = async () => {
+            if (homeFeedSnapshot?.photos.length) {
+                applyPhotoPage(homeFeedSnapshot.photos, false);
+                setLoading(false);
+                void fetchPhotos(0, false, { forceNetwork: forceFreshLoad, silent: true });
+                return;
+            }
+
+            const cached = forceFreshLoad ? null : await PhotoMetadataCache.get(0).catch(() => null);
+            if (cancelled) return;
+
+            if (cached?.length) {
+                applyPhotoPage(cached, false);
+                setLoading(false);
+                void fetchPhotos(0, false, { forceNetwork: forceFreshLoad, silent: true });
+                return;
+            }
+
+            void fetchPhotos(0, false, { forceNetwork: forceFreshLoad });
+        };
+
+        void bootstrap();
+        return () => {
+            cancelled = true;
+        };
+    }, [applyPhotoPage, fetchPhotos, forceFreshLoad]);
+
+    useEffect(() => {
+        if (!photos.length) return;
+        homeFeedSnapshot = { photos, hasMore };
+    }, [photos, hasMore]);
 
     useEffect(() => {
         if (!isOnline) return;
@@ -217,11 +270,11 @@ export default function HomePage() {
 
     useEffect(() => {
         if (uploadedPendingCount === 0 || !isOnline) return;
-        const timer = window.setInterval(() => {
-            void fetchPhotos(0, false, { forceNetwork: true });
-        }, 3000);
-        return () => window.clearInterval(timer);
-    }, [uploadedPendingCount, fetchPhotos, isOnline]);
+        const timer = window.setTimeout(() => {
+            void syncLatest();
+        }, POST_UPLOAD_REFRESH_DELAY_MS);
+        return () => window.clearTimeout(timer);
+    }, [uploadedPendingCount, isOnline, syncLatest]);
 
     useEffect(() => {
         if (!forceFreshLoad) return;
@@ -233,11 +286,14 @@ export default function HomePage() {
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "F5") { e.preventDefault(); fetchPhotos(0, false); }
+            if (e.key === "F5") {
+                e.preventDefault();
+                void syncLatest();
+            }
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [fetchPhotos]);
+    }, [syncLatest]);
 
     const handleTouchStart = (e: React.TouchEvent) => {
         if (window.scrollY === 0) pullStart.current = e.touches[0].clientY;
@@ -252,10 +308,8 @@ export default function HomePage() {
     };
     const handleTouchEnd = async () => {
         if (pullOffset > 60) {
-            setRefreshing(true);
             setPullOffset(40);
-            await fetchPhotos(0, false);
-            setRefreshing(false);
+            await syncLatest();
         }
         setPullOffset(0);
         pullStart.current = 0;
@@ -429,6 +483,15 @@ export default function HomePage() {
         return date.toLocaleDateString(undefined, options);
     }
 
+    useHeaderSyncAction(useMemo(() => ({
+        label: "Sync",
+        loading: syncing,
+        onClick: () => {
+            void syncLatest();
+        },
+        ariaLabel: "Sync latest photos",
+    }), [syncLatest, syncing]));
+
     return (
         <div className="page-shell"
             onTouchStart={handleTouchStart}
@@ -442,8 +505,23 @@ export default function HomePage() {
                 transition: pullOffset === 0 ? "height 300ms ease" : "none",
                 color: "var(--accent)"
             }}>
-                {refreshing ? <Loader size={24} className="spin" /> : <RefreshCw size={24} style={{ transform: `rotate(${pullOffset * 4}deg)`, opacity: pullOffset / 80 }} />}
+                {syncing ? <Loader size={24} className="spin" /> : <RefreshCw size={24} style={{ transform: `rotate(${pullOffset * 4}deg)`, opacity: pullOffset / 80 }} />}
             </div>
+
+            <PageHeader
+                title={filter === "favorites" ? "Favorites" : "Timeline"}
+                actions={(
+                    <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")}>
+                        Upload
+                    </button>
+                )}
+            />
+
+            {syncing && photos.length > 0 && (
+                <div className="status-banner success" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>
+                    Pulling the latest library data.
+                </div>
+            )}
 
             {loading && photos.length === 0 && (
                 <div className="empty-state" style={{ minHeight: "50vh" }}>
@@ -452,10 +530,10 @@ export default function HomePage() {
             )}
 
             {error && (
-                <div style={{ padding: "1rem", background: "var(--error-soft)", borderRadius: "var(--r-md)", color: "var(--error)", fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", border: "1px solid var(--error)", display: "grid", gap: "0.6rem" }}>
+                <div className="status-banner error" style={{ fontWeight: 600, fontSize: "0.9rem", marginBottom: "1.5rem", display: "grid", gap: "0.6rem" }}>
                     <span>{error}</span>
-                    <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void fetchPhotos(0, false, { forceNetwork: true })}>
-                        Retry
+                    <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void syncLatest()}>
+                        Sync again
                     </button>
                 </div>
             )}
@@ -538,7 +616,7 @@ export default function HomePage() {
 
                                             if (isLocal) {
                                                 // Open local photo in viewer using preview URL
-                                                sessionStorage.setItem("local_photo_preview", JSON.stringify({
+                                                safeSessionStorageSet("local_photo_preview", JSON.stringify({
                                                     id: photo.id,
                                                     url: photo.url,
                                                     thumbUrl: photo.thumbUrl,
@@ -549,7 +627,7 @@ export default function HomePage() {
                                                     mediaType: photo.mediaType,
                                                     createdAt: photo.createdAt,
                                                 }));
-                                                sessionStorage.setItem("current_gallery_context", JSON.stringify([photo.id]));
+                                                safeSessionStorageSet("current_gallery_context", JSON.stringify([photo.id]));
                                                 router.push(`/photo/${encodeURIComponent(photo.id)}`);
                                                 return;
                                             }
@@ -559,7 +637,7 @@ export default function HomePage() {
                                                 return;
                                             }
 
-                                            sessionStorage.setItem("current_gallery_context", JSON.stringify(viewerContextIds));
+                                            safeSessionStorageSet("current_gallery_context", JSON.stringify(viewerContextIds));
                                             router.push(`/photo/${photo.id}`);
                                         }}
                                     >
@@ -743,16 +821,22 @@ export default function HomePage() {
     );
 }
 
-function AutoPlayVideoThumb({ id, src, poster }: { id: string; src: string; poster?: string }) {
+function AutoPlayVideoThumb({ src, poster }: { id: string; src: string; poster?: string }) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const [inView, setInView] = useState(false);
-    const [resolvedSrc, setResolvedSrc] = useState(src);
+    const [canAutoplay, setCanAutoplay] = useState(false);
 
     useEffect(() => {
-        setResolvedSrc(src);
-    }, [src]);
+        if (typeof window === "undefined") return;
+
+        const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+        setCanAutoplay(!prefersReducedMotion && !coarsePointer);
+    }, []);
 
     useEffect(() => {
+        if (!canAutoplay) return;
+
         const el = videoRef.current;
         if (!el) return;
 
@@ -765,13 +849,13 @@ function AutoPlayVideoThumb({ id, src, poster }: { id: string; src: string; post
 
         observer.observe(el);
         return () => observer.disconnect();
-    }, []);
+    }, [canAutoplay]);
 
     useEffect(() => {
         const el = videoRef.current;
         if (!el) return;
 
-        if (!inView) {
+        if (!canAutoplay || !inView) {
             el.pause();
             return;
         }
@@ -780,29 +864,17 @@ function AutoPlayVideoThumb({ id, src, poster }: { id: string; src: string; post
         if (playPromise && typeof playPromise.catch === "function") {
             playPromise.catch(() => { });
         }
-    }, [inView, resolvedSrc]);
-
-    useEffect(() => {
-        if (!inView) return;
-        if (id.startsWith("local:")) return;
-
-        const controller = new AbortController();
-        VideoBlobCache.fetchAndCache(id, src, controller.signal)
-            .then((cachedUrl) => setResolvedSrc(cachedUrl))
-            .catch(() => setResolvedSrc(src));
-
-        return () => controller.abort();
-    }, [id, inView, src]);
+    }, [canAutoplay, inView]);
 
     return (
         <video
             ref={videoRef}
-            src={resolvedSrc}
+            src={src}
             poster={poster}
             muted
             loop
             playsInline
-            preload="none"
+            preload={canAutoplay || !poster ? "metadata" : "none"}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
     );

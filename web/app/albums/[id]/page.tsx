@@ -3,7 +3,10 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader, Pencil, Save, Trash2, X } from "lucide-react";
+import { Loader, Pencil, Save, Trash2, X } from "lucide-react";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
+import { PageHeader } from "@/components/PageHeader";
+import { safeSessionStorageSet } from "@/lib/browser-storage";
 import type { Photo } from "@/lib/photo-cache";
 
 type Album = {
@@ -14,29 +17,43 @@ type Album = {
   createdAt: string;
 };
 
+type AlbumDetailSnapshot = {
+  album: Album | null;
+  photos: Photo[];
+};
+
+let albumDetailSnapshots: Record<string, AlbumDetailSnapshot> = {};
+
 export default function AlbumDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = use(params);
+  const cached = albumDetailSnapshots[id];
 
-  const [album, setAlbum] = useState<Album | null>(null);
-  const [photos, setPhotos] = useState<Photo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [album, setAlbum] = useState<Album | null>(() => cached?.album || null);
+  const [photos, setPhotos] = useState<Photo[]>(() => cached?.photos || []);
+  const [loading, setLoading] = useState(() => !cached);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const loadAlbum = useCallback(async () => {
-    setLoading(true);
+  const loadAlbum = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(!albumDetailSnapshots[id]);
     setError(null);
     try {
-      const res = await fetch(`/api/albums/${id}`);
+      const res = await fetch(`/api/albums/${id}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to load album"));
-      setAlbum(data.album || null);
-      setNameDraft(String(data?.album?.name || ""));
-      setPhotos(Array.isArray(data?.photos) ? data.photos : []);
+      const nextSnapshot = {
+        album: data.album || null,
+        photos: Array.isArray(data?.photos) ? data.photos : [],
+      };
+      albumDetailSnapshots[id] = nextSnapshot;
+      setAlbum(nextSnapshot.album);
+      setNameDraft(String(nextSnapshot.album?.name || ""));
+      setPhotos(nextSnapshot.photos);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load album");
     } finally {
@@ -45,8 +62,27 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
   }, [id]);
 
   useEffect(() => {
-    void loadAlbum();
+    void loadAlbum({ silent: !!cached });
   }, [loadAlbum]);
+
+  const syncAlbum = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await loadAlbum({ silent: true });
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadAlbum, syncing]);
+
+  useHeaderSyncAction({
+    label: "Sync",
+    loading: syncing,
+    onClick: () => {
+      void syncAlbum();
+    },
+    ariaLabel: "Sync album",
+  });
 
   const contextIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
 
@@ -67,7 +103,12 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to rename album"));
-      setAlbum(data.album || null);
+      const nextAlbum = data.album || null;
+      setAlbum(nextAlbum);
+      albumDetailSnapshots[id] = {
+        album: nextAlbum,
+        photos,
+      };
       setEditing(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rename album");
@@ -115,9 +156,14 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to remove photos"));
-      setPhotos((prev) => prev.filter((photo) => !selected.has(photo.id)));
+      const nextPhotos = photos.filter((photo) => !selected.has(photo.id));
+      setPhotos(nextPhotos);
+      albumDetailSnapshots[id] = {
+        album,
+        photos: nextPhotos,
+      };
       setSelected(new Set());
-      await loadAlbum();
+      await loadAlbum({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove photos");
     } finally {
@@ -137,31 +183,27 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="page-shell">
-      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1rem" }}>
-        <button className="btn btn-icon btn-secondary" onClick={() => router.push("/albums")} aria-label="Back to albums">
-          <ArrowLeft size={17} />
-        </button>
-
-        <div style={{ flex: 1 }}>
-          {editing ? (
-            <input className="input" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
-          ) : (
-            <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.5rem", fontWeight: 700 }}>
-              {album?.name || "Album"}
-            </h1>
-          )}
-          <p style={{ color: "var(--muted)", fontSize: "0.86rem", marginTop: "0.25rem" }}>
-            {photos.length} items
-          </p>
+      {syncing && album && (
+        <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
+          Pulling the latest album items.
         </div>
+      )}
 
-        {editing ? (
+      <PageHeader
+        title={album?.name || "Album"}
+        subtitle={`${photos.length} item(s) in this album.`}
+        kicker="Albums"
+        onBack={() => router.push("/albums")}
+        backLabel="Back to albums"
+        actions={editing ? (
           <>
             <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(false); setNameDraft(album?.name || ""); }}>
               <X size={14} />
+              Cancel
             </button>
             <button className="btn btn-primary btn-sm" onClick={saveName} disabled={saving || !nameDraft.trim()}>
               <Save size={14} />
+              Save
             </button>
           </>
         ) : (
@@ -170,14 +212,21 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
             Rename
           </button>
         )}
-      </div>
+        meta={null}
+      />
+
+      {editing && (
+        <div className="panel" style={{ marginBottom: "1rem" }}>
+          <input className="input" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} placeholder="Album name" />
+        </div>
+      )}
 
       {error && (
         <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
           <div style={{ display: "grid", gap: "0.5rem" }}>
             <span>{error}</span>
-            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void loadAlbum()}>
-              Retry
+            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void syncAlbum()}>
+              Sync again
             </button>
           </div>
         </div>
@@ -217,7 +266,7 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
                     toggleSelect(photo.id);
                     return;
                   }
-                  sessionStorage.setItem("current_gallery_context", JSON.stringify(contextIds));
+                  safeSessionStorageSet("current_gallery_context", JSON.stringify(contextIds));
                   router.push(`/photo/${photo.id}`);
                 }}
                 onContextMenu={(event) => {

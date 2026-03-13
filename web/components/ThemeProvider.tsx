@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { ACCENT_PALETTES } from "@/lib/palettes";
+import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/browser-storage";
 
 type Theme = "light" | "dark" | "system";
 
@@ -19,15 +20,15 @@ const ThemeContext = createContext<{
 export function useTheme() { return useContext(ThemeContext); }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-    const [theme, setThemeState] = useState<Theme>("system");
+    const [theme, setThemeState] = useState<Theme>("light");
     const [resolved, setResolved] = useState<"light" | "dark">("light");
     const [accentIndex, setAccentIndexState] = useState(0);
 
     useEffect(() => {
-        const savedTheme = localStorage.getItem("vpics-theme") as Theme | null;
+        const savedTheme = safeLocalStorageGet("vpics-theme") as Theme | null;
         if (savedTheme) setThemeState(savedTheme);
 
-        const savedAccent = localStorage.getItem("vpics-accent");
+        const savedAccent = safeLocalStorageGet("vpics-accent");
         if (savedAccent) setAccentIndexState(parseInt(savedAccent, 10));
     }, []);
 
@@ -84,12 +85,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     const setTheme = (t: Theme) => {
         setThemeState(t);
-        localStorage.setItem("vpics-theme", t);
+        safeLocalStorageSet("vpics-theme", t);
     };
 
     const setAccentIndex = (i: number) => {
         setAccentIndexState(i);
-        localStorage.setItem("vpics-accent", i.toString());
+        safeLocalStorageSet("vpics-accent", i.toString());
     };
 
     return (

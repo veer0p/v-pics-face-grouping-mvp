@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { AuthProvider } from "@/components/AuthContext";
 import { UploadQueueProvider } from "@/components/UploadQueueProvider";
+import { NetworkProvider } from "@/components/NetworkContext";
 
 const dmSans = DM_Sans({
     variable: "--font-dm-sans",
@@ -20,7 +21,7 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-    title: "V-Pics · Face Grouping",
+    title: "V-Pics - Face Grouping",
     description: "Upload photos and group faces by person using AI-powered clustering.",
     manifest: "/manifest.json",
     appleWebApp: {
@@ -37,20 +38,20 @@ export const viewport: Viewport = {
     ],
     width: "device-width",
     initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
+    maximumScale: 5,
+    userScalable: true,
     viewportFit: "cover",
 };
-
-import { NetworkProvider } from "@/components/NetworkContext";
 
 export default function RootLayout({
     children,
 }: Readonly<{ children: React.ReactNode }>) {
     return (
         <html lang="en" suppressHydrationWarning>
-            <body className={`${dmSans.variable} ${fraunces.variable}`}
-                style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}>
+            <body
+                className={`${dmSans.variable} ${fraunces.variable}`}
+                style={{ fontFamily: "var(--font-dm-sans), system-ui, sans-serif" }}
+            >
                 <NetworkProvider>
                     <AuthProvider>
                         <ThemeProvider>

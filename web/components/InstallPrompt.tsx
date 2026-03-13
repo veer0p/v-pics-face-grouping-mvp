@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, X, Share } from "lucide-react";
+import { Download, Share, X } from "lucide-react";
+import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/browser-storage";
 
 export function InstallPrompt() {
     const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -10,43 +11,39 @@ export function InstallPrompt() {
     const [dismissed, setDismissed] = useState(false);
 
     useEffect(() => {
-        // Check if already installed
         if (window.matchMedia("(display-mode: standalone)").matches) return;
 
-        // Check if dismissed recently
-        const dismissedAt = localStorage.getItem("vpics-install-dismissed");
+        const dismissedAt = safeLocalStorageGet("vpics-install-dismissed");
         if (dismissedAt && Date.now() - Number(dismissedAt) < 7 * 24 * 60 * 60 * 1000) return;
 
-        // iOS detection
         const ua = navigator.userAgent;
         const isiOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
         setIsIOS(isiOS);
 
         if (isiOS) {
-            // Show iOS instructions after 3 seconds
-            const t = setTimeout(() => setShowBanner(true), 3000);
-            return () => clearTimeout(t);
+            const timer = window.setTimeout(() => setShowBanner(true), 3000);
+            return () => window.clearTimeout(timer);
         }
 
-        // Android/Desktop: listen for beforeinstallprompt
-        const handler = (e: Event) => {
-            e.preventDefault();
-            setDeferredPrompt(e);
+        const handler = (event: Event) => {
+            event.preventDefault();
+            setDeferredPrompt(event);
             setShowBanner(true);
         };
+
         window.addEventListener("beforeinstallprompt", handler);
         return () => window.removeEventListener("beforeinstallprompt", handler);
     }, []);
 
     useEffect(() => {
-        // Register service worker
         if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("/sw.js").catch(() => { });
+            navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).catch(() => { });
         }
     }, []);
 
     const handleInstall = async () => {
         if (!deferredPrompt) return;
+
         deferredPrompt.prompt();
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === "accepted") setShowBanner(false);
@@ -56,7 +53,7 @@ export function InstallPrompt() {
     const handleDismiss = () => {
         setDismissed(true);
         setShowBanner(false);
-        localStorage.setItem("vpics-install-dismissed", String(Date.now()));
+        safeLocalStorageSet("vpics-install-dismissed", String(Date.now()));
     };
 
     if (!showBanner || dismissed) return null;
@@ -68,11 +65,11 @@ export function InstallPrompt() {
                     <Download size={20} strokeWidth={2} />
                 </div>
                 <div className="install-banner-text">
-                    <p className="install-banner-title">Add V‑Pics to Home Screen</p>
+                    <p className="install-banner-title">Add V-Pics to Home Screen</p>
                     <p className="install-banner-sub">
                         {isIOS
                             ? <>Tap <Share size={12} strokeWidth={2.5} style={{ display: "inline", verticalAlign: "-2px" }} /> then &ldquo;Add to Home Screen&rdquo;</>
-                            : "Install for quick access — works offline!"}
+                            : "Install for quick access. Offline support is limited to safe cached assets."}
                     </p>
                 </div>
                 <div className="install-banner-actions">

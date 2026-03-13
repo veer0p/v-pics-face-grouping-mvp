@@ -3,7 +3,8 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader, Trash2, UserPlus } from "lucide-react";
+import { Loader, RefreshCw, Trash2, UserPlus } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
 
 type PersonItem = {
   id: string;
@@ -50,7 +51,14 @@ type ImageMetrics = {
   naturalHeight: number;
 };
 
+type FacePageSnapshot = {
+  asset: AssetDetail | null;
+  people: PersonItem[];
+  faces: FaceItem[];
+};
+
 const MIN_BOX_SIZE = 12;
+const facePageSnapshot = new Map<string, FacePageSnapshot>();
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -73,11 +81,13 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
   const { id } = use(params);
   const router = useRouter();
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const cached = facePageSnapshot.get(id);
 
-  const [asset, setAsset] = useState<AssetDetail | null>(null);
-  const [people, setPeople] = useState<PersonItem[]>([]);
-  const [faces, setFaces] = useState<FaceItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [asset, setAsset] = useState<AssetDetail | null>(() => cached?.asset || null);
+  const [people, setPeople] = useState<PersonItem[]>(() => cached?.people || []);
+  const [faces, setFaces] = useState<FaceItem[]>(() => cached?.faces || []);
+  const [loading, setLoading] = useState(() => !cached);
+  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [creatingPerson, setCreatingPerson] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,14 +99,15 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
   const [selection, setSelection] = useState<Rect | null>(null);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = !!options?.silent;
+    if (!silent) setLoading(!cached);
     setError(null);
     try {
       const [photoRes, peopleRes, facesRes] = await Promise.all([
-        fetch(`/api/photos/${id}`),
-        fetch("/api/people?size=300"),
-        fetch(`/api/photos/${id}/faces`),
+        fetch(`/api/photos/${id}`, { cache: "no-store" }),
+        fetch("/api/people?size=300", { cache: "no-store" }),
+        fetch(`/api/photos/${id}/faces`, { cache: "no-store" }),
       ]);
 
       const photoData = await photoRes.json().catch(() => ({}));
@@ -132,6 +143,18 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
           }))
         : [];
       setFaces(faceItems);
+      facePageSnapshot.set(id, {
+        asset: {
+          id: detail.id,
+          filename: detail.filename,
+          width: detail.width,
+          height: detail.height,
+          url: detail.url,
+          thumbUrl: detail.thumbUrl,
+        },
+        people: peopleList,
+        faces: faceItems,
+      });
       setPersonId((prev) => prev || peopleList[0]?.id || "");
       setNameDraftByFace({});
       setSelection(null);
@@ -140,11 +163,21 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [cached, id]);
 
   useEffect(() => {
-    void load();
+    void load({ silent: !!cached });
   }, [load]);
+
+  const syncAll = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await load();
+    } finally {
+      setSyncing(false);
+    }
+  }, [load, syncing]);
 
   const refreshMetrics = useCallback(() => {
     const image = imageRef.current;
@@ -172,6 +205,7 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
     if (!metrics) return [];
     return faces.map((face) => ({ face, rect: toDisplayRect(face, metrics) }));
   }, [faces, metrics]);
+  const selectedPerson = people.find((person) => person.id === personId) || null;
 
   const addAutoBox = () => {
     if (!metrics) return;
@@ -326,7 +360,14 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
       const res = await fetch(`/api/faces/${faceId}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to delete face"));
-      setFaces((prev) => prev.filter((face) => face.id !== faceId));
+      setFaces((prev) => {
+        const next = prev.filter((face) => face.id !== faceId);
+        const snapshot = facePageSnapshot.get(id);
+        if (snapshot) {
+          facePageSnapshot.set(id, { ...snapshot, faces: next });
+        }
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete face");
     } finally {
@@ -371,241 +412,268 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="page-shell">
-      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", marginBottom: "1rem" }}>
-        <button className="btn btn-icon btn-secondary" onClick={() => router.push(`/photo/${id}`)} aria-label="Back to photo">
-          <ArrowLeft size={17} />
-        </button>
-        <div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.35rem", fontWeight: 700 }}>
-            Face Tagging
-          </h1>
-          <p style={{ color: "var(--muted)", fontSize: "0.82rem", marginTop: "0.2rem" }}>
-            {asset?.filename || id}
-          </p>
+      <PageHeader
+        title="Faces"
+        onBack={() => router.push(`/photo/${id}`)}
+        actions={(
+          <button className="btn btn-secondary btn-sm" onClick={() => void syncAll()} disabled={syncing || saving}>
+            {syncing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
+            {syncing ? "Syncing..." : "Sync"}
+          </button>
+        )}
+      />
+
+      {syncing && faces.length > 0 && (
+        <div className="status-banner success" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>
+          Pulling the latest faces and people.
         </div>
-      </div>
+      )}
 
       {error && (
-        <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
+        <div className="status-banner error" style={{ marginBottom: "1rem" }}>
           <div style={{ display: "grid", gap: "0.5rem" }}>
             <span>{error}</span>
             <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void load()}>
-              Retry
+              Sync again
             </button>
           </div>
         </div>
       )}
       {hint && (
-        <div className="panel" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>
+        <div className="status-banner success" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>
           {hint}
         </div>
       )}
 
-      <div className="panel" style={{ marginBottom: "1rem", display: "grid", gap: "0.7rem" }}>
-        <p className="section-heading">1) Draw Face Box  2) Pick Person  3) Save</p>
-        <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-          New face flow: draw a box, either select a person or type a new name, then save.
-        </p>
-        <div
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerLeave={onPointerUp}
-          style={{
-            position: "relative",
-            borderRadius: "var(--r-md)",
-            overflow: "hidden",
-            border: "1px solid var(--line)",
-            touchAction: "none",
-            width: "fit-content",
-            maxWidth: "100%",
-            marginInline: "auto",
-          }}
-        >
-          <img
-            ref={imageRef}
-            src={asset?.thumbUrl || asset?.url}
-            alt={asset?.filename || "Photo"}
-            onLoad={() => refreshMetrics()}
-            style={{ display: "block", maxWidth: "100%", maxHeight: "62vh", objectFit: "contain", background: "var(--bg-subtle)" }}
-          />
+      <div className="section-stack">
+        <div className="face-workspace">
+          <section className="panel stack-md">
+            <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <p className="section-heading">Photo</p>
+              <span className="info-chip">{faces.length} faces</span>
+            </div>
 
-          {existingFaceRects.map(({ face, rect }) => (
             <div
-              key={face.id}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
               style={{
-                position: "absolute",
-                left: `${rect.x}px`,
-                top: `${rect.y}px`,
-                width: `${rect.width}px`,
-                height: `${rect.height}px`,
-                border: "2px solid rgba(0, 188, 212, 0.95)",
-                background: "rgba(0, 188, 212, 0.12)",
-                pointerEvents: "none",
+                position: "relative",
+                borderRadius: "var(--r-lg)",
+                overflow: "hidden",
+                border: "1px solid var(--line)",
+                touchAction: "none",
+                width: "fit-content",
+                maxWidth: "100%",
+                marginInline: "auto",
+                background: "var(--bg-subtle)",
               }}
-            />
-          ))}
+            >
+              <img
+                ref={imageRef}
+                src={asset?.thumbUrl || asset?.url}
+                alt={asset?.filename || "Photo"}
+                onLoad={() => refreshMetrics()}
+                style={{ display: "block", maxWidth: "100%", maxHeight: "62vh", objectFit: "contain", background: "var(--bg-subtle)" }}
+              />
 
-          {selection && (
-            <div
-              style={{
-                position: "absolute",
-                left: `${selection.x}px`,
-                top: `${selection.y}px`,
-                width: `${selection.width}px`,
-                height: `${selection.height}px`,
-                border: "2px solid var(--accent)",
-                background: "color-mix(in srgb, var(--accent) 20%, transparent)",
-                pointerEvents: "none",
-              }}
-            />
-          )}
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: "0.55rem" }}>
-          <select className="input" value={personId} onChange={(event) => setPersonId(event.target.value)}>
-            <option value="">Select person</option>
-            {people.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-          <button className="btn btn-secondary" onClick={addAutoBox} disabled={!metrics}>
-            Auto Box
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={createFace}
-            disabled={saving || creatingPerson || !selection || (!personId && !newPersonName.trim())}
-          >
-            {saving ? <Loader size={14} className="spin" /> : (!personId && newPersonName.trim() ? "Create + Save Face" : "Save Face")}
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "0.55rem" }}>
-          <input
-            className="input"
-            placeholder="Create new person (e.g. Viraj)"
-            value={newPersonName}
-            onChange={(event) => setNewPersonName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void createPersonAndSelect();
-            }}
-          />
-          <button
-            className="btn btn-secondary"
-            onClick={createPersonAndSelect}
-            disabled={creatingPerson || !newPersonName.trim()}
-          >
-            {creatingPerson ? <Loader size={14} className="spin" /> : <UserPlus size={14} />}
-            Add Person
-          </button>
-        </div>
-        {people.length === 0 && (
-          <p style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-            No people exist yet. Create one above, then tag the face.
-          </p>
-        )}
-      </div>
-
-      <div className="panel">
-        <p className="section-heading" style={{ marginBottom: "0.8rem" }}>Existing Faces ({faces.length})</p>
-        {faces.length === 0 ? (
-          <p style={{ color: "var(--muted)", fontSize: "0.85rem" }}>No faces found for this asset.</p>
-        ) : (
-          <div style={{ display: "grid", gap: "0.65rem" }}>
-            {faces.map((face, index) => (
-              <div key={face.id} style={{ border: "1px solid var(--line)", borderRadius: "var(--r-sm)", padding: "0.7rem", display: "grid", gap: "0.55rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
-                    {face.personThumbnailUrl ? (
-                      <img
-                        src={face.personThumbnailUrl}
-                        alt={face.personName || `Person ${index + 1}`}
-                        style={{ width: 30, height: 30, borderRadius: "999px", objectFit: "cover", border: "1px solid var(--line)" }}
-                      />
-                    ) : (
-                      <div
-                        style={{
-                          width: 30,
-                          height: 30,
-                          borderRadius: "999px",
-                          border: "1px solid var(--line)",
-                          display: "grid",
-                          placeItems: "center",
-                          fontSize: "0.72rem",
-                          color: "var(--muted)",
-                        }}
-                      >
-                        {index + 1}
-                      </div>
-                    )}
-                    <div style={{ fontSize: "0.86rem", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {face.personName || `Person ${index + 1}`}
-                    </div>
-                    <span
-                      style={{
-                        fontSize: "0.72rem",
-                        border: "1px solid var(--line)",
-                        color: "var(--muted)",
-                        borderRadius: "999px",
-                        padding: "0.15rem 0.45rem",
-                        textTransform: "capitalize",
-                      }}
-                    >
-                      {face.sourceType === "machine-learning" ? "Auto" : face.sourceType === "manual" ? "Manual" : "Detected"}
-                    </span>
-                  </div>
-                  <button className="btn btn-ghost btn-sm" style={{ color: "var(--error)" }} onClick={() => removeFace(face.id)} disabled={saving}>
-                    <Trash2 size={14} />
-                    Remove Detection
-                  </button>
-                </div>
-                <select
-                  className="input"
-                  value={face.personId || ""}
-                  onChange={(event) => {
-                    const nextPerson = event.target.value;
-                    if (nextPerson && nextPerson !== (face.personId || "")) {
-                      void reassignFace(face.id, nextPerson);
-                    }
+              {existingFaceRects.map(({ face, rect }) => (
+                <div
+                  key={face.id}
+                  style={{
+                    position: "absolute",
+                    left: `${rect.x}px`,
+                    top: `${rect.y}px`,
+                    width: `${rect.width}px`,
+                    height: `${rect.height}px`,
+                    border: "2px solid rgba(0, 188, 212, 0.95)",
+                    background: "rgba(0, 188, 212, 0.12)",
+                    pointerEvents: "none",
                   }}
-                >
-                  <option value="">Unassigned</option>
-                  {people.map((person) => (
-                    <option key={person.id} value={person.id}>
-                      {person.name}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: "0.55rem" }}>
-                  <input
-                    className="input"
-                    placeholder="Name this face (creates a new person)"
-                    value={nameDraftByFace[face.id] || ""}
-                    onChange={(event) =>
-                      setNameDraftByFace((prev) => ({ ...prev, [face.id]: event.target.value }))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void createPersonAndAssignFace(face.id);
-                    }}
-                  />
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      void createPersonAndAssignFace(face.id);
-                    }}
-                    disabled={saving || creatingPerson || !(nameDraftByFace[face.id] || "").trim()}
-                  >
-                    {creatingPerson ? <Loader size={14} className="spin" /> : <UserPlus size={14} />}
-                    Save Name
-                  </button>
-                </div>
+                />
+              ))}
+
+              {selection && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${selection.x}px`,
+                    top: `${selection.y}px`,
+                    width: `${selection.width}px`,
+                    height: `${selection.height}px`,
+                    border: "2px solid var(--accent)",
+                    background: "color-mix(in srgb, var(--accent) 20%, transparent)",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+            </div>
+          </section>
+
+          <section className="panel stack-md">
+            <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <p className="section-heading">Save new face</p>
+              <span className="info-chip">{selection ? "Box ready" : "Draw box"}</span>
+            </div>
+
+            <div className="split-input-row">
+              <select className="input" value={personId} onChange={(event) => setPersonId(event.target.value)}>
+                <option value="">Select person</option>
+                {people.map((person) => (
+                  <option key={person.id} value={person.id}>
+                    {person.name}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-secondary" onClick={addAutoBox} disabled={!metrics}>
+                Auto box
+              </button>
+            </div>
+
+            <div className="split-input-row">
+              <input
+                className="input"
+                placeholder="Create new person (e.g. Viraj)"
+                value={newPersonName}
+                onChange={(event) => setNewPersonName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void createPersonAndSelect();
+                }}
+              />
+              <button
+                className="btn btn-secondary"
+                onClick={createPersonAndSelect}
+                disabled={creatingPerson || !newPersonName.trim()}
+              >
+                {creatingPerson ? <Loader size={14} className="spin" /> : <UserPlus size={14} />}
+                Add person
+              </button>
+            </div>
+
+            <div className="card-grid-stats">
+              <div className="mini-stat">
+                <div className="mini-stat-label">Target</div>
+                <div className="mini-stat-value" style={{ fontSize: "0.95rem" }}>{selectedPerson?.name || "None"}</div>
               </div>
-            ))}
+              <div className="mini-stat">
+                <div className="mini-stat-label">Box</div>
+                <div className="mini-stat-value" style={{ fontSize: "0.95rem" }}>{selection ? "Ready" : "Missing"}</div>
+              </div>
+            </div>
+
+            <button
+              className="btn btn-primary"
+              onClick={createFace}
+              disabled={saving || creatingPerson || !selection || (!personId && !newPersonName.trim())}
+            >
+              {saving ? <Loader size={14} className="spin" /> : (!personId && newPersonName.trim() ? "Create person and save face" : "Save face")}
+            </button>
+
+            {people.length === 0 && (
+              <p className="helper-copy">
+                Create a person first, then save the face.
+              </p>
+            )}
+          </section>
+        </div>
+
+        <section className="panel stack-md">
+          <div className="action-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <p className="section-heading">Existing faces</p>
+            <span className="info-chip">{faces.length}</span>
           </div>
-        )}
+          {faces.length === 0 ? (
+            <p className="muted-copy">No faces found for this asset.</p>
+          ) : (
+            <div className="face-grid">
+              {faces.map((face, index) => (
+                <div key={face.id} className="face-list-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
+                      {face.personThumbnailUrl ? (
+                        <img
+                          src={face.personThumbnailUrl}
+                          alt={face.personName || `Person ${index + 1}`}
+                          style={{ width: 34, height: 34, borderRadius: "999px", objectFit: "cover", border: "1px solid var(--line)" }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: "999px",
+                            border: "1px solid var(--line)",
+                            display: "grid",
+                            placeItems: "center",
+                            fontSize: "0.74rem",
+                            color: "var(--muted)",
+                          }}
+                        >
+                          {index + 1}
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: "0.9rem", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {face.personName || `Person ${index + 1}`}
+                        </div>
+                        <div className="helper-copy">
+                          {face.sourceType === "machine-learning" ? "Auto detected" : face.sourceType === "manual" ? "Added manually" : "Detected"}
+                        </div>
+                      </div>
+                    </div>
+                    <button className="btn btn-ghost btn-sm" style={{ color: "var(--error)" }} onClick={() => removeFace(face.id)} disabled={saving}>
+                      <Trash2 size={14} />
+                      Remove detection
+                    </button>
+                  </div>
+
+                  <select
+                    className="input"
+                    value={face.personId || ""}
+                    onChange={(event) => {
+                      const nextPerson = event.target.value;
+                      if (nextPerson && nextPerson !== (face.personId || "")) {
+                        void reassignFace(face.id, nextPerson);
+                      }
+                    }}
+                  >
+                    <option value="">Unassigned</option>
+                    {people.map((person) => (
+                      <option key={person.id} value={person.id}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="split-input-row">
+                    <input
+                      className="input"
+                      placeholder="Name this face and create a new person"
+                      value={nameDraftByFace[face.id] || ""}
+                      onChange={(event) =>
+                        setNameDraftByFace((prev) => ({ ...prev, [face.id]: event.target.value }))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") void createPersonAndAssignFace(face.id);
+                      }}
+                    />
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        void createPersonAndAssignFace(face.id);
+                      }}
+                      disabled={saving || creatingPerson || !(nameDraftByFace[face.id] || "").trim()}
+                    >
+                      {creatingPerson ? <Loader size={14} className="spin" /> : <UserPlus size={14} />}
+                      Save name
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );

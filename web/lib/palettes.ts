@@ -24,12 +24,12 @@ export type Palette = {
 export const ACCENT_PALETTES: { light: Palette[]; dark: Palette[] } = {
     light: [
         {
-            name: "Strawberry",
-            accent: "#FF758F", accent2: "#FF4D6D", accentSoft: "rgba(255, 117, 143, 0.15)",
-            ink: "#590D22", ink2: "#800F2F", muted: "#C9184A", muted2: "#FFB3C1",
-            bg: "#FFF0F3", bgElevated: "#FFFFFF", bgSubtle: "#FFEAEE",
+            name: "Luxury Cute",
+            accent: "#A64D70", accent2: "#EFD7B1", accentSoft: "rgba(166, 77, 112, 0.13)",
+            ink: "#2E1722", ink2: "#52313F", muted: "#8A6776", muted2: "#DCC8CF",
+            bg: "#FFFBF8", bgElevated: "#FFFDFC", bgSubtle: "#F8F0F1",
             glow: "transparent",
-            line: "rgba(255, 117, 143, 0.1)", lineStrong: "rgba(255, 117, 143, 0.2)",
+            line: "rgba(82, 49, 63, 0.08)", lineStrong: "rgba(82, 49, 63, 0.16)",
         },
         {
             name: "Lavender",
@@ -66,12 +66,12 @@ export const ACCENT_PALETTES: { light: Palette[]; dark: Palette[] } = {
     ],
     dark: [
         {
-            name: "Matrix",
-            accent: "#00FF41", accent2: "#FFD93D", accentSoft: "rgba(0, 255, 65, 0.15)",
-            ink: "#00FF41", ink2: "#00CC33", muted: "#008F11", muted2: "#003B00",
-            bg: "#0A0A0A", bgElevated: "#0D0D0D", bgSubtle: "#121212",
-            glow: "rgba(0, 255, 65, 0.15)",
-            line: "rgba(0, 255, 65, 0.1)", lineStrong: "rgba(0, 255, 65, 0.2)",
+            name: "Graphite",
+            accent: "#6B7CFF", accent2: "#8FD3FF", accentSoft: "rgba(107, 124, 255, 0.14)",
+            ink: "#F6F7FB", ink2: "#D8DDEA", muted: "#A7B0C3", muted2: "#727C92",
+            bg: "#0D0F14", bgElevated: "#171B24", bgSubtle: "#232836",
+            glow: "transparent",
+            line: "rgba(255, 255, 255, 0.12)", lineStrong: "rgba(255, 255, 255, 0.22)",
         },
         {
             name: "Cyan",

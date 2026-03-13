@@ -41,12 +41,11 @@ export default function OnboardingPage() {
             background: "var(--bg)",
         }}>
             {/* Logo */}
-            <div style={{
-                width: 72, height: 72, borderRadius: "var(--r-lg)",
-                background: "conic-gradient(from 200deg, #5B4EFF, #9D93FF, #60C8FF, #5B4EFF)",
-                boxShadow: "0 12px 36px rgba(91,78,255,0.4)",
+            <div className="glass" style={{
+                width: 88, height: 88, borderRadius: "24px",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                marginBottom: "2rem",
+                marginBottom: "3rem",
+                boxShadow: "var(--shadow-lg)"
             }}>
                 {screen.key === "auth" && <Camera size={32} color="#fff" strokeWidth={1.8} />}
                 {screen.key === "permission" && <Camera size={32} color="#fff" strokeWidth={1.8} />}
@@ -55,10 +54,11 @@ export default function OnboardingPage() {
 
             {/* Title */}
             <h1 style={{
-                fontFamily: "var(--font-display)", fontStyle: "italic",
-                fontSize: "1.65rem", fontWeight: 700, lineHeight: 1.2,
-                whiteSpace: "pre-line", marginBottom: "0.65rem",
-                letterSpacing: "-0.01em",
+                fontFamily: "var(--font-display)",
+                fontSize: "2.4rem", fontWeight: 800, lineHeight: 1.1,
+                whiteSpace: "pre-line", marginBottom: "1rem",
+                letterSpacing: "-0.04em",
+                color: "var(--ink)"
             }}>
                 {screen.title}
             </h1>

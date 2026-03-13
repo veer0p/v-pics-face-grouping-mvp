@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Camera, HardDrive, Loader, LogOut, Monitor, Moon, Save, Sun, Trash2, Upload } from "lucide-react";
+import { Camera, HardDrive, Loader, LogOut, Monitor, Moon, Save, Sun, Trash2, Upload } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAuth } from "@/components/AuthContext";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
 import { UserAvatar } from "@/components/UserAvatar";
+import { PageHeader } from "@/components/PageHeader";
+import { navigateBackOr } from "@/lib/navigation";
 
 type StatsResponse = {
   totalPhotos: number;
@@ -25,6 +28,8 @@ type StatsResponse = {
 
 const MAX_AVATAR_INPUT_SIZE = 25 * 1024 * 1024;
 const MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024;
+
+let settingsStatsSnapshot: StatsResponse | null = null;
 
 async function loadImageElement(file: File): Promise<HTMLImageElement> {
   const blobUrl = URL.createObjectURL(file);
@@ -87,8 +92,9 @@ export default function SettingsPage() {
   const { user, signOut, updateUser } = useAuth();
   const { theme, setTheme } = useTheme();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
-  const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [stats, setStats] = useState<StatsResponse | null>(() => settingsStatsSnapshot);
+  const [statsLoading, setStatsLoading] = useState(() => !settingsStatsSnapshot);
+  const [syncingStats, setSyncingStats] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState(user?.full_name || "");
   const [savingName, setSavingName] = useState(false);
@@ -99,27 +105,39 @@ export default function SettingsPage() {
     setNameDraft(user?.full_name || "");
   }, [user?.full_name]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadStats = async () => {
-      setStatsLoading(true);
-      setStatsError(null);
-      try {
-        const res = await fetch("/api/stats");
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(String(data?.error || "Failed to load stats"));
-        if (!cancelled) setStats(data);
-      } catch (err) {
-        if (!cancelled) setStatsError(err instanceof Error ? err.message : "Failed to load stats");
-      } finally {
-        if (!cancelled) setStatsLoading(false);
-      }
-    };
-    void loadStats();
-    return () => {
-      cancelled = true;
-    };
+  const loadStats = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = !!options?.silent;
+    if (!silent) {
+      setStatsLoading(!settingsStatsSnapshot);
+      setSyncingStats(true);
+    }
+    setStatsError(null);
+    try {
+      const res = await fetch("/api/stats", { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.error || "Failed to load stats"));
+      settingsStatsSnapshot = data;
+      setStats(data);
+    } catch (err) {
+      setStatsError(err instanceof Error ? err.message : "Failed to load stats");
+    } finally {
+      setStatsLoading(false);
+      setSyncingStats(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadStats({ silent: !!settingsStatsSnapshot });
+  }, [loadStats]);
+
+  useHeaderSyncAction({
+    label: "Sync",
+    loading: syncingStats,
+    onClick: () => {
+      void loadStats();
+    },
+    ariaLabel: "Sync settings data",
+  });
 
   const saveName = async () => {
     if (savingName) return;
@@ -211,25 +229,20 @@ export default function SettingsPage() {
 
   return (
     <div className="page-shell settings-shell">
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.2rem" }}>
-        <button className="btn btn-icon btn-secondary mobile-only" onClick={() => router.back()} aria-label="Back">
-          <ArrowLeft size={18} strokeWidth={2} />
-        </button>
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontStyle: "italic",
-            fontSize: "clamp(1.5rem, 4vw, 2rem)",
-            fontWeight: 700,
-          }}
-        >
-          Settings
-        </h1>
-      </div>
+      <PageHeader
+        title="Settings"
+        onBack={() => navigateBackOr(router, "/")}
+      />
+
+      {syncingStats && stats && (
+        <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
+          Pulling the latest profile and library stats.
+        </div>
+      )}
 
       <div className="settings-layout">
         <div className="settings-main-column">
-          <div className="panel settings-account-panel">
+          <div className="glass settings-account-panel" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
             <div className="settings-avatar-wrap">
               <UserAvatar
                 src={user?.avatar_url}
@@ -258,70 +271,71 @@ export default function SettingsPage() {
                 }}
               />
             </div>
-            <div style={{ flex: 1, display: "grid", gap: "0.45rem" }}>
-              <p style={{ fontSize: "0.78rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>
-                Profile
-              </p>
-              <input className="input" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} />
-              <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-                <button className="btn btn-secondary btn-sm" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading}>
-                  <Upload size={14} />
-                  Change Photo
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={removeAvatar} disabled={avatarUploading || !user?.avatar_url}>
-                  Remove Photo
+            <div className="settings-profile-main">
+              <div className="settings-profile-head">
+                <div style={{ minWidth: 0 }}>
+                  <p className="section-heading" style={{ marginBottom: "0.4rem" }}>Profile</p>
+                  <div className="settings-profile-name">{user?.full_name || user?.username || "User"}</div>
+                  {user?.username && <div className="info-chip" style={{ width: "fit-content", marginTop: "0.45rem" }}>@{user.username}</div>}
+                </div>
+                <div className="settings-profile-actions">
+                  <button className="btn btn-secondary btn-sm" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading}>
+                    <Upload size={14} />
+                    Change Photo
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={removeAvatar} disabled={avatarUploading || !user?.avatar_url}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-profile-edit-row">
+                <input className="input" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} placeholder="Display name" />
+                <button className="btn btn-primary btn-sm" onClick={saveName} disabled={savingName}>
+                  {savingName ? <Loader size={14} className="spin" /> : <Save size={14} />}
+                  Save
                 </button>
               </div>
-              <p style={{ color: "var(--muted)", fontSize: "0.78rem" }}>
-                Username/PIN login remains managed in Supabase auth tables.
-              </p>
+
+              <div className="theme-selector settings-theme-inline">
+                <button
+                  className={`theme-selector-btn${theme === "light" ? " active" : ""}`}
+                  onClick={() => setTheme("light")}
+                >
+                    <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Luxury Cute
+                </button>
+                <button
+                  className={`theme-selector-btn${theme === "system" ? " active" : ""}`}
+                  onClick={() => setTheme("system")}
+                >
+                  <Monitor size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Auto
+                </button>
+                <button
+                  className={`theme-selector-btn${theme === "dark" ? " active" : ""}`}
+                  onClick={() => setTheme("dark")}
+                >
+                  <Moon size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Night
+                </button>
+              </div>
             </div>
-            <button className="btn btn-primary btn-sm" onClick={saveName} disabled={savingName}>
-              {savingName ? <Loader size={14} className="spin" /> : <Save size={14} />}
-              Save
-            </button>
           </div>
 
           {profileMessage && (
-            <div className="panel" style={{ borderColor: "var(--line)", color: "var(--ink-2)" }}>
+            <div className="status-banner success" style={{ color: "var(--ink-2)" }}>
               {profileMessage}
             </div>
           )}
 
-          <div className="panel">
-            <p className="section-heading" style={{ marginBottom: "0.85rem" }}>Theme</p>
-            <div className="theme-selector">
-              <button
-                className={`theme-selector-btn${theme === "light" ? " active" : ""}`}
-                onClick={() => setTheme("light")}
-              >
-                <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Light
-              </button>
-              <button
-                className={`theme-selector-btn${theme === "system" ? " active" : ""}`}
-                onClick={() => setTheme("system")}
-              >
-                <Monitor size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> System
-              </button>
-              <button
-                className={`theme-selector-btn${theme === "dark" ? " active" : ""}`}
-                onClick={() => setTheme("dark")}
-              >
-                <Moon size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Dark
-              </button>
-            </div>
-          </div>
-
           {statsError && (
-            <div className="panel" style={{ borderColor: "var(--error)", color: "var(--error)" }}>
+            <div className="status-banner error">
               {statsError}
             </div>
           )}
 
-          <div className="panel">
+          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
-              <p className="section-heading">Library Stats</p>
-              {statsLoading && <Loader size={14} className="spin" color="var(--accent)" />}
+              <p className="section-heading">Library</p>
+              {(statsLoading || syncingStats) && <Loader size={14} className="spin" color="var(--accent)" />}
             </div>
             <div className="stats-row">
               <div className="stat-card">
@@ -356,15 +370,15 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-side-column">
-          <div className="panel">
-            <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Maintenance</p>
+          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
+            <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Quick actions</p>
             <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "flex-start", marginBottom: "0.6rem" }} onClick={() => router.push("/trash")}>
               <Trash2 size={16} />
-              Open Trash Manager
+              Open Trash
             </button>
-            <div style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.5, display: "flex", gap: "0.4rem", alignItems: "center" }}>
+            <div style={{ color: "var(--muted)", fontSize: "0.8rem", lineHeight: 1.4, display: "flex", gap: "0.4rem", alignItems: "center" }}>
               <HardDrive size={13} />
-              Trash and storage now map to Immich directly.
+              Storage usage is synced from Immich.
             </div>
           </div>
 

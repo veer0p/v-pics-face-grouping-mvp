@@ -23,6 +23,7 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { navigateBackOr } from "@/lib/navigation";
 
 type PhotoDetail = {
   id: string;
@@ -627,7 +628,7 @@ export default function EditorPage() {
           borderBottom: "1px solid var(--line)",
         }}
       >
-        <button className="btn btn-ghost btn-sm" onClick={() => router.back()}>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigateBackOr(router, `/photo/${photoId}`)}>
           <X size={16} strokeWidth={2.5} />
           Cancel
         </button>

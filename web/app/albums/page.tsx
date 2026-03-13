@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, Loader, Plus } from "lucide-react";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
+import { PageHeader } from "@/components/PageHeader";
 
 type AlbumItem = {
   id: string;
@@ -13,22 +15,27 @@ type AlbumItem = {
   createdAt: string;
 };
 
+let albumsPageSnapshot: AlbumItem[] | null = null;
+
 export default function AlbumsPage() {
   const router = useRouter();
-  const [albums, setAlbums] = useState<AlbumItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [albums, setAlbums] = useState<AlbumItem[]>(() => albumsPageSnapshot || []);
+  const [loading, setLoading] = useState(() => !albumsPageSnapshot);
+  const [syncing, setSyncing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const loadAlbums = useCallback(async () => {
-    setLoading(true);
+  const loadAlbums = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(!albumsPageSnapshot);
     setError(null);
     try {
-      const res = await fetch("/api/albums");
+      const res = await fetch("/api/albums", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to load albums"));
-      setAlbums(Array.isArray(data?.albums) ? data.albums : []);
+      const nextAlbums = Array.isArray(data?.albums) ? data.albums : [];
+      albumsPageSnapshot = nextAlbums;
+      setAlbums(nextAlbums);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load albums");
     } finally {
@@ -37,8 +44,27 @@ export default function AlbumsPage() {
   }, []);
 
   useEffect(() => {
-    void loadAlbums();
+    void loadAlbums({ silent: !!albumsPageSnapshot });
   }, [loadAlbums]);
+
+  const syncAlbums = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await loadAlbums({ silent: true });
+    } finally {
+      setSyncing(false);
+    }
+  }, [loadAlbums, syncing]);
+
+  useHeaderSyncAction({
+    label: "Sync",
+    loading: syncing,
+    onClick: () => {
+      void syncAlbums();
+    },
+    ariaLabel: "Sync albums",
+  });
 
   const createAlbum = async () => {
     if (creating) return;
@@ -56,7 +82,7 @@ export default function AlbumsPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(String(data?.error || "Failed to create album"));
       setName("");
-      await loadAlbums();
+      await loadAlbums({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create album");
     } finally {
@@ -66,16 +92,31 @@ export default function AlbumsPage() {
 
   return (
     <div className="page-shell">
-      <div style={{ marginBottom: "1.25rem" }}>
-        <h1 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontSize: "1.75rem", fontWeight: 700 }}>
-          Albums
-        </h1>
-        <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: "0.25rem" }}>
-          Immich-backed albums
-        </p>
-      </div>
+      <PageHeader
+        title="Albums"
+        meta={
+          <>
+            <div className="page-meta-card">
+              <div className="page-meta-label">Albums</div>
+              <div className="page-meta-value">{albums.length}</div>
+              <div className="page-meta-sub">Synced from your Immich account</div>
+            </div>
+            <div className="page-meta-card">
+              <div className="page-meta-label">Primary action</div>
+              <div className="page-meta-value">Create album</div>
+              <div className="page-meta-sub">Add items from the timeline or photo viewer later</div>
+            </div>
+          </>
+        }
+      />
 
-      <div className="panel" style={{ marginBottom: "1rem", display: "flex", gap: "0.6rem", alignItems: "center" }}>
+      {syncing && albums.length > 0 && (
+        <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
+          Pulling the latest albums.
+        </div>
+      )}
+
+      <div className="panel split-input-row" style={{ marginBottom: "1rem", alignItems: "center" }}>
         <input
           className="input"
           value={name}
@@ -93,7 +134,12 @@ export default function AlbumsPage() {
 
       {error && (
         <div className="panel" style={{ marginBottom: "1rem", borderColor: "var(--error)", color: "var(--error)" }}>
-          {error}
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <span>{error}</span>
+            <button className="btn btn-secondary btn-sm" style={{ width: "fit-content" }} onClick={() => void syncAlbums()}>
+              Sync again
+            </button>
+          </div>
         </div>
       )}
 

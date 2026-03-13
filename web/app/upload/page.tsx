@@ -2,9 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Loader, RefreshCw, CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { Upload, Loader, RefreshCw, CheckCircle, AlertCircle } from "lucide-react";
 import * as fflate from "fflate";
 import { useUploadQueue } from "@/components/UploadQueueProvider";
+import { PageHeader } from "@/components/PageHeader";
 
 const MAX_QUEUE_SIZE = 3000;
 const ZIP_ENTRY_YIELD_STEP = 40;
@@ -153,24 +154,27 @@ export default function UploadPage() {
 
     return (
         <div className="page-shell">
-            <div style={{ marginBottom: "1.25rem" }}>
-                <h1 style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.5rem" }}>Bulk Upload</h1>
-                <p style={{ fontSize: "0.84rem", color: "var(--muted)", marginTop: "0.35rem" }}>
-                    Photos appear instantly in your gallery while uploads continue in background.
-                </p>
-            </div>
+            <PageHeader
+                title="Upload"
+                kicker="Ingest"
+                meta={
+                    <>
+                        <div className="page-meta-card">
+                            <div className="page-meta-label">Queue</div>
+                            <div className="page-meta-value">{total}</div>
+                            <div className="page-meta-sub">{uploading + queued} in progress</div>
+                        </div>
+                        <div className="page-meta-card">
+                            <div className="page-meta-label">Accepted formats</div>
+                            <div className="page-meta-value">Images, videos, ZIPs</div>
+                            <div className="page-meta-sub">ZIPs are unpacked locally before upload</div>
+                        </div>
+                    </>
+                }
+            />
 
             {error && (
-                <div style={{
-                    marginBottom: "1rem",
-                    background: "var(--error-soft)",
-                    border: "1px solid rgba(239,68,68,0.25)",
-                    color: "var(--error)",
-                    borderRadius: "var(--r-md)",
-                    padding: "0.8rem 1rem",
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                }}>
+                <div className="status-banner error" style={{ marginBottom: "1rem", fontSize: "0.82rem", fontWeight: 600 }}>
                     {error}
                 </div>
             )}
@@ -262,15 +266,7 @@ export default function UploadPage() {
 
             {/* Queue Status Summary */}
             {hasQueue && (
-                <div style={{
-                    marginTop: "1.5rem",
-                    padding: "1rem 1.25rem",
-                    background: "var(--glass-bg-card)",
-                    backdropFilter: "blur(var(--glass-blur))",
-                    border: "1px solid var(--glass-border)",
-                    borderRadius: "var(--r-md)",
-                    boxShadow: "var(--glow-shadow)",
-                }}>
+                <div className="panel" style={{ marginTop: "1.5rem" }}>
                     <div style={{
                         display: "flex", justifyContent: "space-between",
                         alignItems: "center", marginBottom: "0.75rem",
@@ -285,11 +281,7 @@ export default function UploadPage() {
                         gap: "0.5rem",
                     }}>
                         {(uploading + queued) > 0 && (
-                            <div style={{
-                                display: "flex", alignItems: "center", gap: "0.5rem",
-                                padding: "0.6rem 0.75rem",
-                                background: "var(--bg-subtle)", borderRadius: "var(--r-sm)",
-                            }}>
+                            <div className="mini-stat" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                 <Loader size={16} className="spin" color="var(--accent)" />
                                 <div>
                                     <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1 }}>{uploading + queued}</p>
@@ -299,11 +291,7 @@ export default function UploadPage() {
                         )}
 
                         {uploaded > 0 && (
-                            <div style={{
-                                display: "flex", alignItems: "center", gap: "0.5rem",
-                                padding: "0.6rem 0.75rem",
-                                background: "var(--bg-subtle)", borderRadius: "var(--r-sm)",
-                            }}>
+                            <div className="mini-stat" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                                 <CheckCircle size={16} color="#4ade80" />
                                 <div>
                                     <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1 }}>{uploaded}</p>
@@ -313,11 +301,7 @@ export default function UploadPage() {
                         )}
 
                         {failed > 0 && (
-                            <div style={{
-                                display: "flex", alignItems: "center", gap: "0.5rem",
-                                padding: "0.6rem 0.75rem",
-                                background: "rgba(248,113,113,0.08)", borderRadius: "var(--r-sm)",
-                            }}>
+                            <div className="mini-stat" style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "rgba(248,113,113,0.08)" }}>
                                 <AlertCircle size={16} color="#f87171" />
                                 <div>
                                     <p style={{ fontSize: "1rem", fontWeight: 700, lineHeight: 1.1, color: "#f87171" }}>{failed}</p>

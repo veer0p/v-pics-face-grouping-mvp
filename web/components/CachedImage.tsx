@@ -23,16 +23,24 @@ export function CachedImage({ id, src, alt, className, style, loading = "lazy", 
 
     useEffect(() => {
         let isMounted = true;
+        let createdUrl: string | null = null;
+
+        setBlobUrl(null);
+        setError(false);
 
         async function loadImage() {
             try {
                 const url = await ImageBlobCache.fetchAndCache(id, src, category);
-                if (isMounted) setBlobUrl(url);
+                createdUrl = url.startsWith("blob:") ? url : null;
+                if (isMounted) {
+                    setBlobUrl(url);
+                } else if (createdUrl) {
+                    URL.revokeObjectURL(createdUrl);
+                }
             } catch (err) {
                 console.warn("[CachedImage] Caching failed, falling back to network direct.", err);
                 if (isMounted) {
                     setError(true);
-                    // Fallback to direct src if caching fails (e.g. storage full)
                     setBlobUrl(src);
                 }
             }
@@ -42,8 +50,11 @@ export function CachedImage({ id, src, alt, className, style, loading = "lazy", 
 
         return () => {
             isMounted = false;
+            if (createdUrl) {
+                URL.revokeObjectURL(createdUrl);
+            }
         };
-    }, [src]);
+    }, [category, id, src]);
 
     if (!blobUrl && !error) {
         return (
@@ -60,7 +71,13 @@ export function CachedImage({ id, src, alt, className, style, loading = "lazy", 
             className={className}
             style={style}
             loading={loading}
-            onError={() => setError(true)}
+            onError={() => {
+                if (blobUrl?.startsWith("blob:")) {
+                    URL.revokeObjectURL(blobUrl);
+                }
+                setError(true);
+                setBlobUrl(src);
+            }}
         />
     );
 }

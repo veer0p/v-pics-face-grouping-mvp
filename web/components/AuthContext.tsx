@@ -1,5 +1,10 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import {
+    safeLocalStorageGet,
+    safeLocalStorageRemove,
+    safeLocalStorageSet,
+} from "@/lib/browser-storage";
 
 type UserProfile = {
     id: string;
@@ -38,18 +43,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const [user, setUser] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [rememberedUsername, setRememberedUsername] = useState<string | null>(() => {
-        if (typeof window === "undefined") return null;
-        return localStorage.getItem(REMEMBERED_USERNAME_KEY);
+        return safeLocalStorageGet(REMEMBERED_USERNAME_KEY);
     });
 
     const setRemembered = useCallback((username: string | null) => {
         if (typeof window === "undefined") return;
         if (!username) {
-            localStorage.removeItem(REMEMBERED_USERNAME_KEY);
+            safeLocalStorageRemove(REMEMBERED_USERNAME_KEY);
             setRememberedUsername(null);
             return;
         }
-        localStorage.setItem(REMEMBERED_USERNAME_KEY, username);
+        safeLocalStorageSet(REMEMBERED_USERNAME_KEY, username);
         setRememberedUsername(username);
     }, []);
 

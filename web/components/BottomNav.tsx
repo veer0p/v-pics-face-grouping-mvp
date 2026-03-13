@@ -16,8 +16,8 @@ export function BottomNav() {
     const pathname = usePathname();
 
     return (
-        <nav className="bottom-nav">
-            <div className="bottom-nav-inner">
+        <nav className="bottom-nav" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
+            <div className="bottom-nav-inner glass" style={{ borderRadius: 'var(--r-xl)', margin: '0 8px' }}>
                 {NAV_ITEMS.map((item) => {
                     const isActive = item.isProminent ? pathname === item.href : (
                         item.href === "/"
