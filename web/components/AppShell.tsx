@@ -3,7 +3,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Heart, Loader, LogOut, RefreshCw, Settings } from "lucide-react";
+import { ArrowLeft, Heart, Loader, LogOut, RefreshCw, Settings } from "lucide-react";
 import { useAuth } from "@/components/AuthContext";
 import { BottomNav } from "@/components/BottomNav";
 import { FloatingUploadButton } from "@/components/FloatingUploadButton";
@@ -13,10 +13,12 @@ import { PookieBackground } from "@/components/PookieBackground";
 import { useTheme } from "@/components/ThemeProvider";
 import { UserAvatar } from "@/components/UserAvatar";
 import { HeaderSyncProvider, type HeaderSyncAction } from "@/components/HeaderSyncContext";
+import { useNetwork } from "@/components/NetworkContext";
 import { trackInternalRoute } from "@/lib/navigation";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
     const { user, signOut } = useAuth();
+    const { isOnline } = useNetwork();
     const { resolved, accentIndex } = useTheme();
     const pathname = usePathname();
     const router = useRouter();
@@ -88,137 +90,160 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return (
         <HeaderSyncProvider value={setHeaderSyncAction}>
-        <div className="app-shell">
-            {!hideHeader && resolved === "light" && <PookieBackground accentIndex={accentIndex} />}
-            {showSidebar && <Sidebar />}
+            <div
+                className={`app-shell${hideHeader ? " no-header" : ""}`}
+                data-theme="neon-barbie"
+            >
+                {!hideHeader && resolved === "light" && <PookieBackground accentIndex={accentIndex} />}
+                {showSidebar && <Sidebar />}
 
-            {!hideHeader && (
-                <header className={`app-header${hidden ? " header-hidden" : ""}${scrolled ? " header-scrolled" : ""}`}>
-                    <div className="app-header-inner">
-                        <div className="app-header-brand">
-                            <div className="app-header-brand-mark" aria-hidden="true" />
-                            <div className="app-header-brand-copy">
-                                <div className="app-header-brand-kicker">V-Pics</div>
-                                <div className="app-header-brand-title">{pageTitle}</div>
+                {!hideHeader && (
+                    <header className={`app-header${hidden ? " header-hidden" : ""}${scrolled ? " header-scrolled" : ""}`}>
+                        <div className="app-header-inner">
+                            <div className="app-header-brand">
+                                {headerSyncAction?.onBack && (
+                                    <button
+                                        className="btn btn-icon btn-secondary"
+                                        style={{ marginRight: '0.75rem', width: 34, height: 34 }}
+                                        onClick={headerSyncAction.onBack}
+                                        aria-label="Back"
+                                    >
+                                        <ArrowLeft size={18} />
+                                    </button>
+                                )}
+                                <div className="app-header-brand-mark" aria-hidden="true" />
+                                <div className="app-header-brand-copy">
+                                    <div className="app-header-brand-kicker">V-Pics</div>
+                                    {isOnline ? (
+                                        <div className="app-header-brand-title">{headerSyncAction?.title || pageTitle}</div>
+                                    ) : (
+                                        <div className="header-offline-tag">
+                                            <div className="offline-dot" />
+                                            Offline
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                        </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            {showFavoritesToggle && (
-                                <button
-                                    className={`app-header-btn${isFavorites ? " active" : ""}`}
-                                    onClick={toggleFavorites}
-                                    aria-label="Filter Favorites"
-                                    style={isFavorites ? { color: "var(--accent)" } : {}}
-                                >
-                                    <Heart size={20} fill={isFavorites ? "var(--accent)" : "none"} strokeWidth={2} />
-                                </button>
-                            )}
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                {isOnline && headerSyncAction?.pageActions}
 
-                            {headerSyncAction && (
-                                <button
-                                    className="app-header-btn app-header-sync"
-                                    onClick={() => void headerSyncAction.onClick()}
-                                    disabled={headerSyncAction.loading}
-                                    aria-label={headerSyncAction.ariaLabel || headerSyncAction.label || "Sync"}
-                                    title={headerSyncAction.label || "Sync"}
-                                >
-                                    {headerSyncAction.loading ? <Loader size={18} className="spin" /> : <RefreshCw size={18} />}
-                                    <span className="app-header-sync-label">
-                                        {headerSyncAction.loading ? "Syncing..." : headerSyncAction.label || "Sync"}
-                                    </span>
-                                </button>
-                            )}
+                                {isOnline && showFavoritesToggle && (
+                                    <button
+                                        className={`app-header-btn${isFavorites ? " active" : ""}`}
+                                        onClick={toggleFavorites}
+                                        aria-label="Filter Favorites"
+                                        style={isFavorites ? { color: "var(--accent)" } : {}}
+                                    >
+                                        <Heart size={20} fill={isFavorites ? "var(--accent)" : "none"} strokeWidth={2} />
+                                    </button>
+                                )}
 
-                            <div style={{ position: "relative" }} ref={accountMenuRef}>
-                                <button
-                                    className="app-avatar"
-                                    title="Account"
-                                    aria-label="Account"
-                                    onClick={() => setShowMenu((open) => !open)}
-                                >
-                                    <UserAvatar
-                                        src={user?.avatar_url}
-                                        name={user?.full_name || user?.username || "User"}
-                                        size={34}
-                                        style={{ width: "100%", height: "100%" }}
-                                    />
-                                    {user && (
+                                {isOnline && headerSyncAction?.onClick && (
+                                    <button
+                                        className="app-header-btn app-header-sync"
+                                        onClick={() => void headerSyncAction.onClick!()}
+                                        disabled={headerSyncAction.loading}
+                                        aria-label={headerSyncAction.ariaLabel || headerSyncAction.label || "Sync"}
+                                        title={headerSyncAction.label || "Sync"}
+                                    >
+                                        {headerSyncAction.loading ? <Loader size={18} className="spin" /> : <RefreshCw size={18} />}
+                                        <span className="app-header-sync-label">
+                                            {headerSyncAction.loading ? "Syncing..." : headerSyncAction.label || "Sync"}
+                                        </span>
+                                    </button>
+                                )}
+
+                                <div style={{ position: "relative" }} ref={accountMenuRef}>
+                                    <button
+                                        className="app-avatar"
+                                        title="Account"
+                                        aria-label="Account"
+                                        onClick={() => setShowMenu((open) => !open)}
+                                    >
+                                        <UserAvatar
+                                            src={user?.avatar_url}
+                                            name={user?.full_name || user?.username || "User"}
+                                            size={34}
+                                            style={{ width: "100%", height: "100%" }}
+                                        />
+                                        {user && (
+                                            <div
+                                                style={{
+                                                    position: "absolute",
+                                                    bottom: -2,
+                                                    right: -2,
+                                                    width: 10,
+                                                    height: 10,
+                                                    borderRadius: "50%",
+                                                    background: "var(--accent)",
+                                                    border: "2px solid var(--bg)",
+                                                }}
+                                            />
+                                        )}
+                                    </button>
+
+                                    {showMenu && (
                                         <div
+                                            className="dropdown-menu"
                                             style={{
                                                 position: "absolute",
-                                                bottom: -2,
-                                                right: -2,
-                                                width: 10,
-                                                height: 10,
-                                                borderRadius: "50%",
-                                                background: "var(--accent)",
-                                                border: "2px solid var(--bg)",
+                                                top: "100%",
+                                                right: 0,
+                                                marginTop: "0.5rem",
+                                                zIndex: 100,
+                                                animation: "fadeIn 0.2s ease",
                                             }}
-                                        />
-                                    )}
-                                </button>
+                                        >
+                                            <div style={{ padding: "0.85rem 0.95rem" }}>
+                                                <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Signed in as</div>
+                                                <div style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--ink)", wordBreak: "break-word" }}>{user?.full_name}</div>
+                                                {user?.username && (
+                                                    <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--muted)" }}>@{user.username}</div>
+                                                )}
+                                            </div>
 
-                                {showMenu && (
-                                    <div
-                                        className="dropdown-menu"
-                                        style={{
-                                            position: "absolute",
-                                            top: "100%",
-                                            right: 0,
-                                            marginTop: "0.5rem",
-                                            minWidth: "220px",
-                                            zIndex: 100,
-                                            animation: "fadeIn 0.2s ease",
-                                        }}
-                                    >
-                                        <div style={{ padding: "0.85rem 0.95rem", borderBottom: "1px solid var(--line)", marginBottom: "0.35rem" }}>
-                                            <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Signed in as</div>
-                                            <div style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--ink)", wordBreak: "break-word" }}>{user?.full_name}</div>
-                                            {user?.username && (
-                                                <div style={{ marginTop: "0.2rem", fontSize: "0.8rem", color: "var(--muted)" }}>@{user.username}</div>
-                                            )}
+                                            <div className="menu-item-sep" />
+
+                                            <button
+                                                className="menu-item"
+                                                onClick={() => {
+                                                    setShowMenu(false);
+                                                    router.push("/settings");
+                                                }}
+                                            >
+                                                <Settings size={16} />
+                                                <span>Settings</span>
+                                            </button>
+
+                                            <button
+                                                className="menu-item"
+                                                style={{ color: "var(--error)" }}
+                                                onClick={async () => {
+                                                    setShowMenu(false);
+                                                    await signOut();
+                                                    router.replace("/login");
+                                                }}
+                                            >
+                                                <LogOut size={16} />
+                                                <span>Sign Out</span>
+                                            </button>
                                         </div>
-
-                                        <button
-                                            className="menu-item"
-                                            onClick={() => {
-                                                setShowMenu(false);
-                                                router.push("/settings");
-                                            }}
-                                        >
-                                            <Settings size={16} />
-                                            <span>Settings</span>
-                                        </button>
-
-                                        <button
-                                            className="menu-item"
-                                            style={{ color: "var(--error)" }}
-                                            onClick={async () => {
-                                                setShowMenu(false);
-                                                await signOut();
-                                                router.replace("/login");
-                                            }}
-                                        >
-                                            <LogOut size={16} />
-                                            <span>Sign Out</span>
-                                        </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </header>
-            )}
+                    </header>
+                )}
 
-            <main className={`page-content${hideHeader ? " no-header" : ""}${showSidebar ? " with-sidebar" : ""}`}>
-                <Suspense fallback={null}>{children}</Suspense>
-            </main>
+                <main className={`page-content${hideHeader ? " no-header" : ""}${showSidebar ? " with-sidebar" : ""}`}>
+                    <Suspense fallback={null}>{children}</Suspense>
+                </main>
 
-            {!hideHeader && <InstallPrompt />}
-            {!hideHeader && <BottomNav />}
-            {!hideHeader && <FloatingUploadButton />}
-        </div>
+                {!hideHeader && <InstallPrompt />}
+                {!hideHeader && <BottomNav />}
+                {!hideHeader && <FloatingUploadButton />}
+            </div>
         </HeaderSyncProvider>
     );
 }

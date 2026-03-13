@@ -39,5 +39,9 @@ export function getSafeBackTarget(currentPath?: string) {
 
 export function navigateBackOr(router: AppRouterInstance, fallback: string, currentPath?: string) {
     const target = getSafeBackTarget(currentPath);
-    router.push(target || fallback);
+    if (target) {
+        router.back();
+    } else {
+        router.push(fallback);
+    }
 }

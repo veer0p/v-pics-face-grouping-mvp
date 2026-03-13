@@ -121,220 +121,421 @@ export default function LoginPage() {
 
     return (
         <div style={{
-            minHeight: "100vh",
+            minHeight: "100dvh",
             display: "grid",
             placeItems: "center",
-            padding: "2rem 1.25rem",
+            padding: "1.5rem 1.25rem",
+            background: "var(--bg)",
+            color: "var(--ink)",
+            position: "relative",
+            overflow: "hidden"
         }}>
-            <div style={{ width: "min(960px, 100%)", display: "grid", gap: "1rem" }}>
-                <div className="page-grid-2" style={{ alignItems: "stretch" }}>
-                    <section className="panel stack-md" style={{ minHeight: 420, justifyContent: "center" }}>
-                        <div className="glass" style={{
-                            width: 80,
-                            height: 80,
-                            borderRadius: 24,
-                            display: "grid",
-                            placeItems: "center",
-                            marginBottom: '1rem'
+            {/* Ambient Background Glows */}
+            <div style={{
+                position: "absolute",
+                top: "-10%",
+                left: "-10%",
+                width: "40vw",
+                height: "40vw",
+                background: "radial-gradient(circle, rgba(255, 0, 127, 0.1) 0%, transparent 70%)",
+                filter: "blur(60px)",
+                zIndex: 0
+            }} />
+            <div style={{
+                position: "absolute",
+                bottom: "-10%",
+                right: "-10%",
+                width: "40vw",
+                height: "40vw",
+                background: "radial-gradient(circle, rgba(255, 0, 127, 0.1) 0%, transparent 70%)",
+                filter: "blur(60px)",
+                zIndex: 0
+            }} />
+
+            <div style={{
+                width: "min(420px, 100%)",
+                position: "relative",
+                zIndex: 1,
+                perspective: "1000px"
+            }}>
+                <section style={{
+                    background: "var(--glass-bg)",
+                    backdropFilter: "blur(var(--glass-blur))",
+                    WebkitBackdropFilter: "blur(var(--glass-blur))",
+                    border: "1px solid var(--glass-border)",
+                    borderRadius: "32px",
+                    padding: "2.5rem 2rem",
+                    boxShadow: "var(--shadow-md), var(--shadow-lg)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "1.5rem",
+                    width: "100%"
+                }}>
+                    <div style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 18,
+                        background: "var(--accent)",
+                        boxShadow: "var(--accent-glow)",
+                        display: "grid",
+                        placeItems: "center",
+                    }}>
+                        <Camera size={32} color="#fff" />
+                    </div>
+
+                    <div style={{ textAlign: "center", marginBottom: "0.5rem" }}>
+                        <h1 style={{
+                            fontSize: "1.75rem",
+                            fontWeight: 700,
+                            marginBottom: "0.5rem",
+                            letterSpacing: "-0.02em"
                         }}>
-                            <Camera size={32} color="var(--accent)" />
-                        </div>
-                        <div className="stack-sm">
-                            <p className="section-heading">Private gallery</p>
-                            <h1 style={{ fontSize: "2rem", fontWeight: 700, lineHeight: 1.05 }}>Sign in to V-Pics</h1>
-                            <p className="muted-copy">
-                                Keep the auth flow simple: username + 4-digit PIN for normal sign-in, or quick unlock when the device already remembers you.
-                            </p>
-                        </div>
-                        {/* Stats hidden for minimalism */}
-                    </section>
-
-                    <section className="panel stack-md" style={{ alignItems: "center", justifyContent: "center" }}>
-                        <div className="stack-sm" style={{ alignItems: "center", textAlign: "center" }}>
-                            <h2 style={{ fontSize: "1.4rem", fontWeight: 700 }}>
-                                {activeMode === "unlock" ? "Quick unlock" : activeMode === "signin" ? "Account sign in" : "Create account"}
-                            </h2>
-                            {activeMode === "unlock" && rememberedUsername ? (
-                                <p className="muted-copy">
-                                    Welcome back <strong>{rememberedUsername}</strong>
-                                </p>
-                            ) : (
-                                <p className="muted-copy">
-                                    {activeMode === "signin"
-                                        ? "Enter your username and 4-digit PIN."
-                                        : "Create a username, full name, and 4-digit PIN."}
-                                </p>
-                            )}
-                        </div>
-
-                        {error && (
-                            <p style={{ color: "var(--error)", fontWeight: 600, fontSize: "0.85rem" }}>{error}</p>
-                        )}
-
+                            {activeMode === "unlock" ? "Quick Unlock" : activeMode === "signin" ? "Sign in to V-Pics" : "Create Account"}
+                        </h1>
                         {activeMode === "unlock" && rememberedUsername ? (
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem" }}>
-                                <div style={{ display: "flex", gap: "0.9rem", marginBottom: "0.5rem" }}>
-                                    {unlockDots.map((idx) => (
-                                        <span
-                                            key={idx}
-                                            style={{
-                                                width: 14,
-                                                height: 14,
-                                                borderRadius: "50%",
-                                                border: "2px solid var(--accent)",
-                                                background: unlockPin.length > idx ? "var(--accent)" : "transparent",
-                                            }}
-                                        />
-                                    ))}
-                                </div>
-                                <div style={{
-                                    display: "grid",
-                                    gridTemplateColumns: "repeat(3, 72px)",
-                                    gap: "0.8rem",
-                                }}>
-                                    {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
-                                        <button
-                                            key={digit}
-                                            type="button"
-                                            disabled={submitting}
-                                            onClick={() => void handleUnlockDigit(digit)}
-                                            className="btn"
-                                            style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
-                                        >
-                                            {digit}
-                                        </button>
-                                    ))}
+                            <p style={{ color: "var(--ink-2)", fontSize: "0.95rem" }}>
+                                Welcome back, <strong style={{ color: "var(--accent)" }}>{rememberedUsername}</strong>
+                            </p>
+                        ) : (
+                            <p style={{ color: "var(--ink-2)", fontSize: "0.9rem" }}>
+                                {activeMode === "signin"
+                                    ? "Enter your credentials to continue"
+                                    : "Join the private gallery today"}
+                            </p>
+                        )}
+                    </div>
+
+                    {error && (
+                        <div style={{
+                            width: "100%",
+                            padding: "0.75rem",
+                            borderRadius: "12px",
+                            background: "rgba(239, 68, 68, 0.1)",
+                            border: "1px solid rgba(239, 68, 68, 0.2)",
+                            color: "#ef4444",
+                            fontSize: "0.85rem",
+                            fontWeight: 500,
+                            textAlign: "center"
+                        }}>
+                            {error}
+                        </div>
+                    )}
+
+                    {activeMode === "unlock" && rememberedUsername ? (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2rem", width: "100%" }}>
+                            <div style={{ display: "flex", gap: "1rem" }}>
+                                {unlockDots.map((idx) => (
+                                    <div
+                                        key={idx}
+                                        style={{
+                                            width: 14,
+                                            height: 14,
+                                            borderRadius: "50%",
+                                            border: "2px solid var(--accent)",
+                                            background: unlockPin.length > idx ? "var(--accent)" : "transparent",
+                                            boxShadow: unlockPin.length > idx ? "0 0 10px var(--accent)" : "none",
+                                            transition: "all 0.2s ease"
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <div style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(3, 1fr)",
+                                gap: "1rem",
+                                width: "100%"
+                            }}>
+                                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
                                     <button
-                                        type="button"
-                                        className="btn"
-                                        title="Biometric unlock is not enabled yet"
-                                        disabled
-                                        style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
-                                    >
-                                        <Fingerprint size={18} />
-                                    </button>
-                                    <button
+                                        key={digit}
                                         type="button"
                                         disabled={submitting}
-                                        onClick={() => void handleUnlockDigit("0")}
-                                        className="btn"
-                                        style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
+                                        onClick={() => void handleUnlockDigit(digit)}
+                                        style={{
+                                            borderRadius: "16px",
+                                            height: 64,
+                                            background: "rgba(255,255,255,0.05)",
+                                            border: "1px solid rgba(255,255,255,0.1)",
+                                            color: "var(--ink)",
+                                            fontSize: "1.25rem",
+                                            fontWeight: 600,
+                                            transition: "all 0.2s ease",
+                                            cursor: "pointer"
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                                            e.currentTarget.style.borderColor = "var(--line)";
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                                            e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+                                        }}
                                     >
-                                        0
+                                        {digit}
                                     </button>
-                                    <button
-                                        type="button"
-                                        disabled={submitting}
-                                        onClick={handleUnlockDelete}
-                                        className="btn"
-                                        style={{ borderRadius: "999px", height: 56, minHeight: 56 }}
-                                    >
-                                        <Delete size={16} />
-                                    </button>
-                                </div>
+                                ))}
                                 <button
-                                    className="btn btn-secondary"
+                                    type="button"
+                                    disabled
+                                    style={{ borderRadius: "16px", height: 64, opacity: 0.3, background: "none", border: "none" }}
+                                >
+                                    <Fingerprint size={24} color="var(--ink)" />
+                                </button>
+                                <button
                                     type="button"
                                     disabled={submitting}
-                                    onClick={() => {
-                                        clearRememberedUsername();
-                                        setMode("signin");
-                                        setUnlockPin("");
-                                        setError(null);
+                                    onClick={() => void handleUnlockDigit("0")}
+                                    style={{
+                                        borderRadius: "16px",
+                                        height: 64,
+                                        background: "rgba(255,255,255,0.05)",
+                                        border: "1px solid rgba(255,255,255,0.1)",
+                                        color: "var(--ink)",
+                                        fontSize: "1.25rem",
+                                        fontWeight: 600,
+                                        transition: "all 0.2s ease",
+                                        cursor: "pointer"
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                                        e.currentTarget.style.borderColor = "var(--line)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
                                     }}
                                 >
-                                    Use Different Account
+                                    0
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={submitting}
+                                    onClick={handleUnlockDelete}
+                                    style={{
+                                        borderRadius: "16px",
+                                        height: 64,
+                                        background: "rgba(255,255,255,0.05)",
+                                        border: "1px solid rgba(255,255,255,0.1)",
+                                        color: "var(--ink)",
+                                        display: "grid",
+                                        placeItems: "center",
+                                        transition: "all 0.2s ease",
+                                        cursor: "pointer"
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = "rgba(255,255,255,0.1)";
+                                        e.currentTarget.style.borderColor = "var(--line)";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                                        e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+                                    }}
+                                >
+                                    <Delete size={20} />
                                 </button>
                             </div>
-                        ) : (
-                            <div style={{ width: "100%", maxWidth: 360 }}>
-                                {activeMode === "signin" ? (
-                                    <form onSubmit={handleSignInSubmit} style={{ display: "grid", gap: "0.75rem" }}>
+                            <button
+                                style={{
+                                    background: "none",
+                                    border: "none",
+                                    color: "var(--muted)",
+                                    fontSize: "0.85rem",
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                    textDecoration: "underline"
+                                }}
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => {
+                                    clearRememberedUsername();
+                                    setMode("signin");
+                                    setUnlockPin("");
+                                    setError(null);
+                                }}
+                            >
+                                Use Different Account
+                            </button>
+                        </div>
+                    ) : (
+                        <div style={{ width: "100%" }}>
+                            {activeMode === "signin" ? (
+                                <form onSubmit={handleSignInSubmit} style={{ display: "grid", gap: "1.25rem" }}>
+                                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                                        <label style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>Username</label>
                                         <input
                                             value={signinUsername}
                                             onChange={(e) => setSigninUsername(e.target.value)}
-                                            placeholder="Username"
+                                            placeholder="Enter username"
                                             autoComplete="username"
-                                            className="input"
+                                            style={{
+                                                background: "rgba(255,255,255,0.05)",
+                                                border: "1px solid var(--line)",
+                                                borderRadius: "12px",
+                                                padding: "0.8rem 1rem",
+                                                color: "var(--ink)",
+                                                fontSize: "0.95rem",
+                                                outline: "none"
+                                            }}
                                         />
+                                    </div>
+                                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                                        <label style={{ fontSize: "0.75rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--muted)" }}>4-Digit PIN</label>
                                         <input
                                             value={signinPin}
                                             onChange={(e) => setSigninPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
-                                            placeholder="4-digit PIN"
+                                            placeholder="••••"
                                             inputMode="numeric"
+                                            type="password"
                                             autoComplete="current-password"
-                                            className="input"
-                                        />
-                                        <button className="btn btn-primary" type="submit" disabled={submitting}>
-                                            {submitting ? <Loader size={16} className="spin" /> : "Sign In"}
-                                        </button>
-                                    </form>
-                                ) : (
-                                    <form onSubmit={handleSignUpSubmit} style={{ display: "grid", gap: "0.75rem" }}>
-                                        <input
-                                            value={signupUsername}
-                                            onChange={(e) => setSignupUsername(e.target.value)}
-                                            placeholder="Username (a-z, 0-9, _)"
-                                            autoComplete="username"
-                                            className="input"
-                                        />
-                                        <input
-                                            value={signupFullName}
-                                            onChange={(e) => setSignupFullName(e.target.value)}
-                                            placeholder="Full name"
-                                            autoComplete="name"
-                                            className="input"
-                                        />
-                                        <input
-                                            value={signupPin}
-                                            onChange={(e) => setSignupPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
-                                            placeholder="Create 4-digit PIN"
-                                            inputMode="numeric"
-                                            autoComplete="new-password"
-                                            className="input"
-                                        />
-                                        <input
-                                            value={signupConfirmPin}
-                                            onChange={(e) => setSignupConfirmPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
-                                            placeholder="Confirm PIN"
-                                            inputMode="numeric"
-                                            autoComplete="new-password"
-                                            className="input"
-                                        />
-                                        <button className="btn btn-primary" type="submit" disabled={submitting}>
-                                            {submitting ? <Loader size={16} className="spin" /> : "Create Account"}
-                                        </button>
-                                    </form>
-                                )}
-
-                                <div style={{ marginTop: "0.9rem", display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-                                    <button
-                                        className="btn btn-ghost btn-sm"
-                                        type="button"
-                                        onClick={() => {
-                                            setMode(activeMode === "signin" ? "signup" : "signin");
-                                            setError(null);
-                                        }}
-                                    >
-                                        {activeMode === "signin" ? "New user? Sign up" : "Already have an account? Sign in"}
-                                    </button>
-                                    {rememberedUsername && (
-                                        <button
-                                            className="btn btn-ghost btn-sm"
-                                            type="button"
-                                            onClick={() => {
-                                                setMode("unlock");
-                                                setError(null);
+                                            style={{
+                                                background: "rgba(255,255,255,0.05)",
+                                                border: "1px solid var(--line)",
+                                                borderRadius: "12px",
+                                                padding: "0.8rem 1rem",
+                                                color: "var(--ink)",
+                                                fontSize: "1.1rem",
+                                                letterSpacing: "0.3em",
+                                                outline: "none"
                                             }}
-                                        >
-                                            Quick Unlock
-                                        </button>
-                                    )}
-                                </div>
+                                        />
+                                    </div>
+                                    <button
+                                        style={{
+                                            background: "var(--accent)",
+                                            color: "#fff",
+                                            border: "none",
+                                            borderRadius: "12px",
+                                            padding: "1rem",
+                                            fontSize: "1rem",
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                            marginTop: "0.5rem",
+                                            boxShadow: "var(--accent-glow)",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            transition: "transform 0.2s ease"
+                                        }}
+                                        type="submit"
+                                        disabled={submitting}
+                                        onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
+                                        onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+                                    >
+                                        {submitting ? <Loader size={20} className="spin" /> : "Sign In"}
+                                    </button>
+                                </form>
+                            ) : (
+                                <form onSubmit={handleSignUpSubmit} style={{ display: "grid", gap: "1rem" }}>
+                                    <input
+                                        value={signupUsername}
+                                        onChange={(e) => setSignupUsername(e.target.value)}
+                                        placeholder="Username"
+                                        style={{
+                                            background: "rgba(255,255,255,0.05)",
+                                            border: "1px solid var(--line)",
+                                            borderRadius: "12px",
+                                            padding: "0.8rem 1rem",
+                                            color: "var(--ink)",
+                                            fontSize: "0.95rem",
+                                            outline: "none"
+                                        }}
+                                    />
+                                    <input
+                                        value={signupFullName}
+                                        onChange={(e) => setSignupFullName(e.target.value)}
+                                        placeholder="Full Name"
+                                        style={{
+                                            background: "rgba(255,255,255,0.05)",
+                                            border: "1px solid var(--line)",
+                                            borderRadius: "12px",
+                                            padding: "0.8rem 1rem",
+                                            color: "var(--ink)",
+                                            fontSize: "0.95rem",
+                                            outline: "none"
+                                        }}
+                                    />
+                                    <input
+                                        value={signupPin}
+                                        onChange={(e) => setSignupPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                                        placeholder="4-digit PIN"
+                                        inputMode="numeric"
+                                        type="password"
+                                        style={{
+                                            background: "rgba(255,255,255,0.05)",
+                                            border: "1px solid var(--line)",
+                                            borderRadius: "12px",
+                                            padding: "0.8rem 1rem",
+                                            color: "var(--ink)",
+                                            fontSize: "0.95rem",
+                                            outline: "none"
+                                        }}
+                                    />
+                                    <input
+                                        value={signupConfirmPin}
+                                        onChange={(e) => setSignupConfirmPin(e.target.value.replace(/[^\d]/g, "").slice(0, 4))}
+                                        placeholder="Confirm PIN"
+                                        inputMode="numeric"
+                                        type="password"
+                                        style={{
+                                            background: "rgba(255,255,255,0.05)",
+                                            border: "1px solid var(--line)",
+                                            borderRadius: "12px",
+                                            padding: "0.8rem 1rem",
+                                            color: "var(--ink)",
+                                            fontSize: "0.95rem",
+                                            outline: "none"
+                                        }}
+                                    />
+                                    <button
+                                        style={{
+                                            background: "var(--accent)",
+                                            color: "#fff",
+                                            border: "none",
+                                            borderRadius: "12px",
+                                            padding: "1rem",
+                                            fontSize: "1rem",
+                                            fontWeight: 700,
+                                            cursor: "pointer",
+                                            marginTop: "0.5rem",
+                                            boxShadow: "var(--accent-glow)",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            transition: "transform 0.2s ease"
+                                        }}
+                                        type="submit"
+                                        disabled={submitting}
+                                        onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
+                                        onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
+                                    >
+                                        {submitting ? <Loader size={20} className="spin" /> : "Create Account"}
+                                    </button>
+                                </form>
+                            )}
+
+                            <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+                                <button
+                                    style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: "var(--accent)",
+                                        fontSize: "0.85rem",
+                                        fontWeight: 600,
+                                        cursor: "pointer"
+                                    }}
+                                    type="button"
+                                    onClick={() => {
+                                        setMode(activeMode === "signin" ? "signup" : "signin");
+                                        setError(null);
+                                    }}
+                                >
+                                    {activeMode === "signin" ? "New here? Create an account" : "Already have an account? Sign in"}
+                                </button>
                             </div>
-                        )}
-                    </section>
-                </div>
+                        </div>
+                    )}
+                </section>
             </div>
         </div>
     );

@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FolderOpen, Loader, Plus } from "lucide-react";
 import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
-import { PageHeader } from "@/components/PageHeader";
 
 type AlbumItem = {
   id: string;
@@ -92,23 +91,6 @@ export default function AlbumsPage() {
 
   return (
     <div className="page-shell">
-      <PageHeader
-        title="Albums"
-        meta={
-          <>
-            <div className="page-meta-card">
-              <div className="page-meta-label">Albums</div>
-              <div className="page-meta-value">{albums.length}</div>
-              <div className="page-meta-sub">Synced from your Immich account</div>
-            </div>
-            <div className="page-meta-card">
-              <div className="page-meta-label">Primary action</div>
-              <div className="page-meta-value">Create album</div>
-              <div className="page-meta-sub">Add items from the timeline or photo viewer later</div>
-            </div>
-          </>
-        }
-      />
 
       {syncing && albums.length > 0 && (
         <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>

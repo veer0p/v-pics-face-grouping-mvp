@@ -278,8 +278,8 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
     const visibleComments = useMemo(() => (currentId ? comments[currentId] || [] : []), [comments, currentId]);
 
     return (
-        <div style={{ position: "fixed", inset: 0, background: "#000", color: "#fff", display: "flex", flexDirection: "column", zIndex: 100 }}>
-            <div className="glass" style={{ position: "absolute", top: '16px', left: '16px', right: '16px', display: "flex", justifyContent: "space-between", gap: "0.75rem", padding: "0.8rem 1.2rem", borderRadius: 'var(--r-md)', zIndex: 50, border: 'none' }}>
+        <div style={{ position: "fixed", inset: 0, background: "var(--bg)", color: "var(--ink)", display: "flex", flexDirection: "column", zIndex: 100 }}>
+            <div className="glass" style={{ position: "absolute", top: '16px', left: '16px', right: '16px', display: "flex", justifyContent: "space-between", gap: "0.75rem", padding: "0.8rem 1.2rem", borderRadius: 'var(--r-md)', zIndex: 50 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => navigateBackOr(router, "/")} aria-label="Back to timeline"><ArrowLeft size={16} /></button>
                     <div style={{ minWidth: 0, marginLeft: "0.35rem" }}>
@@ -312,9 +312,11 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                                     gap: 6,
                                     padding: "0.45rem",
                                     borderRadius: 16,
-                                    background: "rgba(18, 20, 26, 0.96)",
-                                    border: "1px solid rgba(255,255,255,0.12)",
-                                    boxShadow: "0 18px 48px rgba(0,0,0,0.35)",
+                                    background: "unset",
+                                    backgroundColor: "var(--glass-bg)",
+                                    backdropFilter: "blur(var(--glass-blur))",
+                                    border: "1px solid var(--glass-border)",
+                                    boxShadow: "var(--shadow-depth)",
                                     zIndex: 45,
                                 }}
                             >
@@ -423,8 +425,8 @@ export default function PhotoViewerPage({ params }: { params: Promise<{ id: stri
                 </div>
 
                 {panelOpen && photo && (
-                    <aside className="desktop-only glass" style={{ width: 340, margin: '16px', borderRadius: 'var(--r-lg)', border: 'none', display: "flex", flexDirection: "column", height: 'calc(100% - 32px)' }}>
-                        <div className="glass" style={{ display: "flex", alignItems: "center", border: 'none', borderRadius: 'var(--r-md) var(--r-md) 0 0', margin: '4px' }}>
+                    <aside className="desktop-only glass" style={{ width: 340, margin: '16px', borderRadius: 'var(--r-lg)', display: "flex", flexDirection: "column", height: 'calc(100% - 32px)' }}>
+                        <div className="glass" style={{ display: "flex", alignItems: "center", borderRadius: 'var(--r-md) var(--r-md) 0 0', margin: '4px' }}>
                             <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "info" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("info")}>Details</button>
                             <button className="btn btn-ghost btn-sm" style={{ flex: 1, borderRadius: 0, color: panel === "comments" ? "var(--accent)" : "var(--muted)" }} onClick={() => setPanel("comments")}>Comments</button>
                             <button className="btn btn-ghost btn-sm" style={{ borderRadius: 0 }} onClick={() => setPanelOpen(false)} aria-label="Close drawer">
@@ -799,9 +801,9 @@ function CleanVideoPlayer({
                     width: "fit-content",
                     maxWidth: "100%",
                     maxHeight: "calc(100vh - 8rem)",
-                    background: "#040404",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    borderRadius: 14,
+                    background: "var(--bg)",
+                    border: "1px solid var(--glass-border)",
+                    borderRadius: "var(--r-md)",
                     overflow: "hidden",
                     position: "relative",
                 }}
@@ -825,7 +827,7 @@ function CleanVideoPlayer({
                         maxWidth: "100%",
                         maxHeight: "calc(100vh - 8rem)",
                         objectFit: "contain",
-                        background: "#000",
+                        background: "var(--bg-subtle)",
                     }}
                 />
 
@@ -859,7 +861,7 @@ function CleanVideoPlayer({
                         alignItems: "center",
                         gap: 8,
                         padding: "0.55rem 0.7rem",
-                        background: "linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0.2), transparent)",
+                        background: "linear-gradient(to top, rgba(0,0,0,0.85), transparent)",
                     }}
                 >
                     <button className="btn btn-ghost btn-sm" style={{ minHeight: 34, height: 34, width: 34, padding: 0 }} onClick={togglePlay}>

@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Clock, Loader, Search, User, X } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
 import {
   safeLocalStorageGet,
   safeLocalStorageRemove,
@@ -97,12 +96,9 @@ export default function SearchContent() {
 
   return (
     <div className="page-shell">
-      <PageHeader
-        title="Search"
-      />
 
       <form onSubmit={handleSubmit} style={{ marginBottom: "2rem" }}>
-        <div className="search-page-bar glass" style={{ padding: "1rem 1.5rem", borderRadius: 'var(--r-xl)', border: 'none' }}>
+        <div className="search-page-bar glass" style={{ padding: "1rem 1.5rem", borderRadius: 'var(--r-xl)' }}>
           <Search size={22} strokeWidth={2.5} className="search-page-bar-icon" style={{ color: 'var(--accent)' }} />
           <input
             type="text"

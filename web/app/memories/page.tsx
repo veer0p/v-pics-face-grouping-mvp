@@ -1,7 +1,6 @@
 "use client";
 
 import { Clock3, Play, Sparkles } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
 
 const MEMORIES = [
     { title: "3 years ago in Goa", date: "December 2022", count: 12, summary: "Beach sunsets, candid portraits, and travel details." },
@@ -15,24 +14,6 @@ export default function MemoriesPage() {
 
     return (
         <div className="page-shell section-stack">
-            <PageHeader
-                title="Memories"
-                kicker="Highlights"
-                meta={
-                    <>
-                        <div className="page-meta-card">
-                            <div className="page-meta-label">Featured</div>
-                            <div className="page-meta-value">{featured.title}</div>
-                            <div className="page-meta-sub">{featured.count} photos in this set</div>
-                        </div>
-                        <div className="page-meta-card">
-                            <div className="page-meta-label">Focus</div>
-                            <div className="page-meta-value">Story-first</div>
-                            <div className="page-meta-sub">Bigger cover, clearer labels, less decorative chrome</div>
-                        </div>
-                    </>
-                }
-            />
 
             <div className="page-grid-2">
                 <section className="panel stack-md">

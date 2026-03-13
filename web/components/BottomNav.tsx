@@ -16,8 +16,8 @@ export function BottomNav() {
     const pathname = usePathname();
 
     return (
-        <nav className="bottom-nav" style={{ backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-            <div className="bottom-nav-inner glass" style={{ borderRadius: 'var(--r-xl)', margin: '0 8px' }}>
+        <nav className="bottom-nav">
+            <div className="bottom-nav-inner">
                 {NAV_ITEMS.map((item) => {
                     const isActive = item.isProminent ? pathname === item.href : (
                         item.href === "/"
@@ -33,12 +33,11 @@ export function BottomNav() {
                         >
                             <span className="nav-icon">
                                 <item.Icon
-                                    size={item.isProminent ? 32 : 22}
-                                    strokeWidth={isActive || item.isProminent ? 2.5 : 1.7}
-                                    fill={isActive && !item.isProminent ? "currentColor" : "none"}
+                                    size={24}
+                                    strokeWidth={isActive ? 2.5 : 2}
+                                    fill={isActive ? "currentColor" : "none"}
                                 />
                             </span>
-                            {!item.isProminent && <span className="nav-label">{item.label}</span>}
                         </Link>
                     );
                 })}

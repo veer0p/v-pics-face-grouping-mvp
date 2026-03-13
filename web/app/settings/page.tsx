@@ -7,7 +7,6 @@ import { useTheme } from "@/components/ThemeProvider";
 import { useAuth } from "@/components/AuthContext";
 import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
 import { UserAvatar } from "@/components/UserAvatar";
-import { PageHeader } from "@/components/PageHeader";
 import { navigateBackOr } from "@/lib/navigation";
 
 type StatsResponse = {
@@ -137,6 +136,7 @@ export default function SettingsPage() {
       void loadStats();
     },
     ariaLabel: "Sync settings data",
+    onBack: () => navigateBackOr(router, "/"),
   });
 
   const saveName = async () => {
@@ -229,10 +229,6 @@ export default function SettingsPage() {
 
   return (
     <div className="page-shell settings-shell">
-      <PageHeader
-        title="Settings"
-        onBack={() => navigateBackOr(router, "/")}
-      />
 
       {syncingStats && stats && (
         <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
@@ -242,7 +238,7 @@ export default function SettingsPage() {
 
       <div className="settings-layout">
         <div className="settings-main-column">
-          <div className="glass settings-account-panel" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
+          <div className="glass settings-account-panel" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', marginBottom: '1.5rem' }}>
             <div className="settings-avatar-wrap">
               <UserAvatar
                 src={user?.avatar_url}
@@ -302,7 +298,7 @@ export default function SettingsPage() {
                   className={`theme-selector-btn${theme === "light" ? " active" : ""}`}
                   onClick={() => setTheme("light")}
                 >
-                    <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Luxury Cute
+                  <Sun size={14} style={{ display: "inline", verticalAlign: "-2px", marginRight: 4 }} /> Luxury Cute
                 </button>
                 <button
                   className={`theme-selector-btn${theme === "system" ? " active" : ""}`}
@@ -332,7 +328,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
+          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', marginBottom: '1.5rem' }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.8rem" }}>
               <p className="section-heading">Library</p>
               {(statsLoading || syncingStats) && <Loader size={14} className="spin" color="var(--accent)" />}
@@ -370,7 +366,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-side-column">
-          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', border: 'none', marginBottom: '1.5rem' }}>
+          <div className="glass" style={{ padding: '2rem', borderRadius: 'var(--r-lg)', marginBottom: '1.5rem' }}>
             <p className="section-heading" style={{ marginBottom: "0.75rem" }}>Quick actions</p>
             <button className="btn btn-secondary" style={{ width: "100%", justifyContent: "flex-start", marginBottom: "0.6rem" }} onClick={() => router.push("/trash")}>
               <Trash2 size={16} />

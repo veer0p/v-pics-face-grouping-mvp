@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Images, Loader, ScanFace, Settings2, Upload, Users } from "lucide-react";
 import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
-import { PageHeader } from "@/components/PageHeader";
 import { safeSessionStorageSet } from "@/lib/browser-storage";
 import type { Photo } from "@/lib/photo-cache";
 
@@ -435,7 +434,6 @@ export default function PeoplePage() {
 
   return (
     <div className="page-shell">
-      <PageHeader title="People" />
 
       {syncing && (people.length > 0 || unassignedFaces.length > 0) && (
         <div className="status-banner success" style={{ marginBottom: "0.85rem", color: "var(--ink-2)" }}>
@@ -501,50 +499,50 @@ export default function PeoplePage() {
             </div>
 
             <div className="people-strip" role="list" aria-label="People">
-            {people.map((person) => {
-              const active = selectedPersonId === person.id;
-              return (
-                <div
-                  key={person.id}
-                  className={`people-strip-card glass${active ? " active" : ""}`}
-                  style={{ borderRadius: 'var(--r-xl)', padding: '8px', border: 'none' }}
-                  role="listitem"
-                >
-                  <div className="people-strip-avatar-wrap">
-                    <button
-                      type="button"
-                      className="people-strip-select"
-                      onClick={() => handleSelectPerson(person.id)}
-                      aria-pressed={active}
-                      aria-label={`Show ${person.name}`}
-                    >
-                      <img
-                        src={person.thumbnailUrl}
-                        alt={person.name}
-                        className="people-strip-avatar"
-                      />
-                    </button>
-                    {active && (
+              {people.map((person) => {
+                const active = selectedPersonId === person.id;
+                return (
+                  <div
+                    key={person.id}
+                    className={`people-strip-card glass${active ? " active" : ""}`}
+                    style={{ borderRadius: 'var(--r-xl)', padding: '8px' }}
+                    role="listitem"
+                  >
+                    <div className="people-strip-avatar-wrap">
                       <button
                         type="button"
-                        className={`people-strip-settings${toolsOpen ? " active" : ""}`}
-                        onClick={() => handleToggleTools(person.id)}
-                        aria-label={`${toolsOpen ? "Close" : "Open"} settings for ${person.name}`}
+                        className="people-strip-select"
+                        onClick={() => handleSelectPerson(person.id)}
+                        aria-pressed={active}
+                        aria-label={`Show ${person.name}`}
                       >
-                        <Settings2 size={14} />
+                        <img
+                          src={person.thumbnailUrl}
+                          alt={person.name}
+                          className="people-strip-avatar"
+                        />
                       </button>
-                    )}
+                      {active && (
+                        <button
+                          type="button"
+                          className={`people-strip-settings${toolsOpen ? " active" : ""}`}
+                          onClick={() => handleToggleTools(person.id)}
+                          aria-label={`${toolsOpen ? "Close" : "Open"} settings for ${person.name}`}
+                        >
+                          <Settings2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="people-strip-name-button"
+                      onClick={() => handleSelectPerson(person.id)}
+                    >
+                      <span className="people-strip-name">{person.name}</span>
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="people-strip-name-button"
-                    onClick={() => handleSelectPerson(person.id)}
-                  >
-                    <span className="people-strip-name">{person.name}</span>
-                  </button>
-                </div>
-              );
-            })}
+                );
+              })}
             </div>
           </section>
 

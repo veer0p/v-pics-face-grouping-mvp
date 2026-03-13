@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Upload, Loader, RefreshCw, CheckCircle, AlertCircle } from "lucide-react";
 import * as fflate from "fflate";
 import { useUploadQueue } from "@/components/UploadQueueProvider";
-import { PageHeader } from "@/components/PageHeader";
 
 const MAX_QUEUE_SIZE = 3000;
 const ZIP_ENTRY_YIELD_STEP = 40;
@@ -154,24 +153,6 @@ export default function UploadPage() {
 
     return (
         <div className="page-shell">
-            <PageHeader
-                title="Upload"
-                kicker="Ingest"
-                meta={
-                    <>
-                        <div className="page-meta-card">
-                            <div className="page-meta-label">Queue</div>
-                            <div className="page-meta-value">{total}</div>
-                            <div className="page-meta-sub">{uploading + queued} in progress</div>
-                        </div>
-                        <div className="page-meta-card">
-                            <div className="page-meta-label">Accepted formats</div>
-                            <div className="page-meta-value">Images, videos, ZIPs</div>
-                            <div className="page-meta-sub">ZIPs are unpacked locally before upload</div>
-                        </div>
-                    </>
-                }
-            />
 
             {error && (
                 <div className="status-banner error" style={{ marginBottom: "1rem", fontSize: "0.82rem", fontWeight: 600 }}>

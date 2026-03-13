@@ -3,10 +3,13 @@
 import { createContext, useContext, useEffect } from "react";
 
 export type HeaderSyncAction = {
+    title?: string;
     label?: string;
     loading?: boolean;
-    onClick: () => void | Promise<void>;
+    onClick?: () => void | Promise<void>;
     ariaLabel?: string;
+    onBack?: () => void;
+    pageActions?: React.ReactNode;
 };
 
 const HeaderSyncContext = createContext<((action: HeaderSyncAction | null) => void) | null>(null);

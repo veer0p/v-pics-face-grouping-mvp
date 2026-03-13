@@ -4,7 +4,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader, RefreshCw, Trash2, UserPlus } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
 
 type PersonItem = {
   id: string;
@@ -130,17 +130,17 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
 
       const peopleList: PersonItem[] = Array.isArray(peopleData?.people)
         ? (peopleData.people as Array<{ id: string; name?: string; thumbnailUrl?: string }>).map((person, index) => ({
-            id: person.id,
-            name: String(person.name || "").trim() || `Person ${index + 1}`,
-            thumbnailUrl: person.thumbnailUrl || (person.id ? `/api/people/${person.id}/thumbnail` : undefined),
-          }))
+          id: person.id,
+          name: String(person.name || "").trim() || `Person ${index + 1}`,
+          thumbnailUrl: person.thumbnailUrl || (person.id ? `/api/people/${person.id}/thumbnail` : undefined),
+        }))
         : [];
       setPeople(peopleList);
       const faceItems = Array.isArray(facesData?.faces)
         ? (facesData.faces as FaceItem[]).map((face, index) => ({
-            ...face,
-            personName: String(face.personName || "").trim() || (face.personId ? `Person ${index + 1}` : null),
-          }))
+          ...face,
+          personName: String(face.personName || "").trim() || (face.personId ? `Person ${index + 1}` : null),
+        }))
         : [];
       setFaces(faceItems);
       facePageSnapshot.set(id, {
@@ -178,6 +178,16 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
       setSyncing(false);
     }
   }, [load, syncing]);
+
+  useHeaderSyncAction(useMemo(() => ({
+    label: "Sync",
+    loading: syncing,
+    onClick: () => {
+      void syncAll();
+    },
+    ariaLabel: "Sync faces for photo",
+    onBack: () => router.back(),
+  }), [syncAll, syncing, router]));
 
   const refreshMetrics = useCallback(() => {
     const image = imageRef.current;
@@ -412,16 +422,6 @@ export default function PhotoFacesPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="page-shell">
-      <PageHeader
-        title="Faces"
-        onBack={() => router.push(`/photo/${id}`)}
-        actions={(
-          <button className="btn btn-secondary btn-sm" onClick={() => void syncAll()} disabled={syncing || saving}>
-            {syncing ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
-            {syncing ? "Syncing..." : "Sync"}
-          </button>
-        )}
-      />
 
       {syncing && faces.length > 0 && (
         <div className="status-banner success" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>

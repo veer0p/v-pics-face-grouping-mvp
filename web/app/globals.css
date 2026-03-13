@@ -3,6 +3,29 @@
    v-pics face grouping MVP
    ========================================================= */
 
+.header-offline-tag {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.6rem;
+    background: var(--glass-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.offline-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #94a3b8;
+    box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
+}
+
 /* ── Fonts ────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,500;0,9..144,700;1,9..144,300;1,9..144,400&display=swap');
 
@@ -12,7 +35,7 @@
     --bg: #040507;
     --bg-elevated: #0d0f14;
     --bg-subtle: #161a22;
-    
+
     /* -- Content Primary (Text) -- */
     --ink: #ffffff;
     --ink-2: #e2e8f0;
@@ -57,6 +80,7 @@
     --font-display: "Fraunces", Georgia, serif;
     --font-mono: 'SF Mono', 'Fira Code', monospace;
 
+
     /* -- Responsive Breakpoints -- */
     --bp-sm: 640px;
     --bp-md: 768px;
@@ -82,7 +106,7 @@
 
     --accent: #4f46e5;
     --accent-soft: rgba(79, 70, 229, 0.1);
-    
+
     --line: rgba(15, 23, 42, 0.08);
     --line-strong: rgba(15, 23, 42, 0.14);
 
@@ -92,8 +116,40 @@
     --glass-border: rgba(15, 23, 42, 0.05);
 }
 
-[data-theme="dark-minimal"] {
-    /* Root values are dark by default */
+
+
+[data-theme="neon-barbie"] {
+    --bg: #060408;
+    --bg-elevated: rgba(20, 10, 15, 0.65);
+    --bg-subtle: #0f0a12;
+    --ink: #FFFFFF;
+    --ink-2: rgba(255, 255, 255, 0.85);
+    --muted: rgba(255, 255, 255, 0.55);
+    --muted-2: rgba(255, 255, 255, 0.35);
+
+    --accent: #FF007F;
+    /* Electric Barbie Pink */
+    --accent-2: #FF66CC;
+    /* Hot Pink */
+    --accent-soft: rgba(255, 0, 127, 0.15);
+    --accent-glow: 0 0 25px rgba(255, 0, 127, 0.6);
+
+    --line: rgba(255, 0, 127, 0.35);
+    --line-strong: rgba(255, 0, 127, 0.55);
+
+    --glass-bg: rgba(20, 10, 15, 0.85);
+    --glass-border: rgba(255, 0, 127, 0.7);
+    --glass-blur: 24px;
+
+    --shadow-sm: 0 4px 12px rgba(255, 0, 127, 0.15);
+    --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.7);
+    --shadow-lg: 0 0 40px rgba(255, 0, 127, 0.25);
+    --glow-shadow: 0 0 15px rgba(255, 0, 127, 0.4), 0 0 3px rgba(255, 0, 127, 0.6);
+}
+
+/* Hide PookieBackground when Neon Barbie is active to ensure legibility */
+[data-theme="neon-barbie"] .luxury-cute-bg {
+    display: none;
 }
 
 /* ── Reset ────────────────────────────────────────────── */
@@ -156,9 +212,11 @@ img {
 /* ── Apple Liquid Glass ───────────────────────────────── */
 /* ── Glass Effects ────────────────────────────────────── */
 .glass {
-    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
     border: 1px solid var(--glass-border);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-md), var(--glow-shadow);
 }
 
 .glass-heavy {
@@ -209,7 +267,28 @@ img {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+.bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    pointer-events: none;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-nav-inner {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0.65rem 1rem;
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
 }
 
 @media (min-width: 1024px) {
@@ -417,8 +496,9 @@ img {
     padding: 0.55rem 0.8rem;
     border-radius: 4px;
     /* More terminal-like */
-    border: 1px solid var(--line);
+    border: 1px solid var(--glass-border);
     background: var(--bg-subtle);
+    box-shadow: var(--glow-shadow);
     transition: box-shadow 150ms ease, border-color 150ms ease;
     cursor: text;
     min-width: 0;
@@ -549,8 +629,8 @@ img {
     gap: 0.15rem;
     background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
     border-radius: var(--r-xl);
-    border: 1px solid var(--line);
-    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-lg), var(--glow-shadow);
 }
 
 .bottom-nav-item {
@@ -579,7 +659,7 @@ img {
     height: 64px;
     background: var(--accent);
     color: #fff;
-    border-radius: 20px;
+    border-radius: 12px;
     margin-top: -22px;
     box-shadow: 0 12px 30px color-mix(in srgb, var(--accent) 28%, transparent);
     border: 3px solid var(--bg-elevated);
@@ -1232,7 +1312,7 @@ img {
     border: 1px solid var(--line-strong);
     border-radius: var(--r-lg);
     padding: 1.25rem;
-    box-shadow: var(--shadow-sm);
+    box-shadow: var(--shadow-sm), var(--glow-shadow);
 }
 
 /* ── Buttons ──────────────────────────────────────────── */
@@ -2407,6 +2487,7 @@ img {
 }
 
 @keyframes luxury-float {
+
     0%,
     100% {
         transform: translate3d(0, 0, 0) scale(1);
@@ -3168,7 +3249,7 @@ img {
 
 .photo-viewer-main {
     flex: 1;
-    background: #000;
+    background: var(--bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3249,6 +3330,13 @@ img {
 /* ── No header utility ────────────────────────────────── */
 .page-content.no-header {
     padding-top: 0;
+    padding-bottom: 0;
+}
+
+.app-shell.no-header {
+    padding-bottom: 0;
+    background: var(--bg);
+    min-height: 100dvh;
 }
 
 /* ── Responsive ───────────────────────────────────────── */
@@ -3293,16 +3381,73 @@ img {
 }
 
 /* ── Dropdown Menu ────────────────────────────────────── */
-.dropdown-menu {
-    position: absolute;
-    background: var(--bg-elevated);
+.bottom-nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0.65rem 1.25rem;
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto;
+    background: rgba(10, 5, 10, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--line);
+    border-radius: 999px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+.bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 1;
+    color: #FFFFFF;
+    transition: all 150ms ease;
+    opacity: 0.6;
+}
+
+.bottom-nav-item.active {
+    color: #FFFFFF;
+    opacity: 1;
+}
+
+.nav-icon {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border-radius: var(--r-md);
-    padding: 0.5rem;
-    min-width: 160px;
-    box-shadow: var(--shadow-lg);
-    z-index: 50;
-    animation: fade-in 150ms ease;
+    transition: all 200ms ease;
+}
+
+.active .nav-icon {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glow-shadow);
+    transform: translateY(-2px);
+}
+
+.nav-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    margin-top: 2px;
+}
+
+/* ── Dropdown & Menu Items ───────────────────────────── */
+.dropdown-menu {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--shadow-depth), var(--glow-shadow);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    min-width: 220px;
 }
 
 .menu-item {
@@ -3310,42 +3455,28 @@ img {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.65rem 0.85rem;
-    border-radius: var(--r-sm);
+    padding: 0.75rem 1rem;
     background: transparent;
     border: none;
     color: var(--ink-2);
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 120ms;
+    text-align: left;
+    transition: all 150ms ease;
 }
 
 .menu-item:hover {
     background: var(--accent-soft);
     color: var(--accent);
 }
-/* ── Menu & Picker Items ───────────────────────────── */
-.menu-item {
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    width: 100%;
-    padding: 0.65rem 0.75rem;
-    border: none;
-    background: none;
-    color: var(--ink);
-    font-size: 0.82rem;
-    font-weight: 500;
-    border-radius: var(--r-sm);
-    cursor: pointer;
-    text-align: left;
-    transition: background 150ms ease;
+
+.menu-item-sep {
+    height: 1px;
+    background: var(--line);
+    margin: 0.25rem 0;
 }
 
-.menu-item:hover {
-    background: var(--bg-subtle);
-}
 
 .album-picker-item {
     display: flex;
@@ -3404,19 +3535,22 @@ img {
 }
 
 .shimmer {
-    background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.2) 50%,
-        rgba(255, 255, 255, 0) 100%
-    );
+    background: linear-gradient(90deg,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.2) 50%,
+            rgba(255, 255, 255, 0) 100%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
 }
 
 @keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0% {
+        background-position: -200% 0;
+    }
+
+    100% {
+        background-position: 200% 0;
+    }
 }
 
 /* ── Layout Utilities ────────────────────────────────── */
@@ -3429,7 +3563,7 @@ img {
 .photo-viewer-main {
     flex: 1;
     position: relative;
-    background: #000;
+    background: var(--bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3474,4 +3608,3 @@ img {
         padding: 0.9rem;
     }
 }
-

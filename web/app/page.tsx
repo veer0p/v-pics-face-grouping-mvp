@@ -10,7 +10,6 @@ import { PhotoMetadataCache, type Photo } from "@/lib/photo-cache";
 import { CachedImage } from "@/components/CachedImage";
 import { useUploadQueue, type PendingUploadItem } from "@/components/UploadQueueProvider";
 import { useNetwork } from "@/components/NetworkContext";
-import { PageHeader } from "@/components/PageHeader";
 import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
 import { safeSessionStorageSet } from "@/lib/browser-storage";
 
@@ -499,25 +498,19 @@ export default function HomePage() {
             onTouchEnd={handleTouchEnd}
             style={{ paddingTop: "1rem" }}
         >
-            <div style={{
-                height: pullOffset, overflow: "hidden", display: "flex",
-                alignItems: "center", justifyContent: "center",
-                transition: pullOffset === 0 ? "height 300ms ease" : "none",
-                color: "var(--accent)"
-            }}>
-                {syncing ? <Loader size={24} className="spin" /> : <RefreshCw size={24} style={{ transform: `rotate(${pullOffset * 4}deg)`, opacity: pullOffset / 80 }} />}
-            </div>
+            {isOnline && (
+                <div style={{
+                    height: pullOffset, overflow: "hidden", display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                    transition: pullOffset === 0 ? "height 300ms ease" : "none",
+                    color: "var(--accent)"
+                }}>
+                    {syncing ? <Loader size={24} className="spin" /> : <RefreshCw size={24} style={{ transform: `rotate(${pullOffset * 4}deg)`, opacity: pullOffset / 80 }} />}
+                </div>
+            )}
 
-            <PageHeader
-                title={filter === "favorites" ? "Favorites" : "Timeline"}
-                actions={(
-                    <button className="btn btn-primary btn-sm" onClick={() => router.push("/upload")}>
-                        Upload
-                    </button>
-                )}
-            />
 
-            {syncing && photos.length > 0 && (
+            {isOnline && syncing && photos.length > 0 && (
                 <div className="status-banner success" style={{ marginBottom: "1rem", color: "var(--ink-2)" }}>
                     Pulling the latest library data.
                 </div>

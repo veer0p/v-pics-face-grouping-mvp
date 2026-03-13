@@ -5,7 +5,6 @@ import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader, Pencil, Save, Trash2, X } from "lucide-react";
 import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
-import { PageHeader } from "@/components/PageHeader";
 import { safeSessionStorageSet } from "@/lib/browser-storage";
 import type { Photo } from "@/lib/photo-cache";
 
@@ -75,14 +74,6 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
     }
   }, [loadAlbum, syncing]);
 
-  useHeaderSyncAction({
-    label: "Sync",
-    loading: syncing,
-    onClick: () => {
-      void syncAlbum();
-    },
-    ariaLabel: "Sync album",
-  });
 
   const contextIds = useMemo(() => photos.map((photo) => photo.id), [photos]);
 
@@ -133,6 +124,34 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
       setSaving(false);
     }
   };
+
+  useHeaderSyncAction(useMemo(() => ({
+    title: album?.name || "Album",
+    label: "Sync",
+    loading: syncing,
+    onClick: () => {
+      void syncAlbum();
+    },
+    ariaLabel: "Sync album",
+    onBack: () => router.push("/albums"),
+    pageActions: editing ? (
+      <>
+        <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(false); setNameDraft(album?.name || ""); }}>
+          <X size={14} />
+          Cancel
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={saveName} disabled={saving || !nameDraft.trim()}>
+          <Save size={14} />
+          Save
+        </button>
+      </>
+    ) : (
+      <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
+        <Pencil size={14} />
+        Rename
+      </button>
+    )
+  }), [editing, album?.name, saving, nameDraft, saveName, syncAlbum, syncing, router]));
 
   const toggleSelect = (photoId: string) => {
     setSelected((prev) => {
@@ -189,31 +208,6 @@ export default function AlbumDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
-      <PageHeader
-        title={album?.name || "Album"}
-        subtitle={`${photos.length} item(s) in this album.`}
-        kicker="Albums"
-        onBack={() => router.push("/albums")}
-        backLabel="Back to albums"
-        actions={editing ? (
-          <>
-            <button className="btn btn-secondary btn-sm" onClick={() => { setEditing(false); setNameDraft(album?.name || ""); }}>
-              <X size={14} />
-              Cancel
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={saveName} disabled={saving || !nameDraft.trim()}>
-              <Save size={14} />
-              Save
-            </button>
-          </>
-        ) : (
-          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>
-            <Pencil size={14} />
-            Rename
-          </button>
-        )}
-        meta={null}
-      />
 
       {editing && (
         <div className="panel" style={{ marginBottom: "1rem" }}>

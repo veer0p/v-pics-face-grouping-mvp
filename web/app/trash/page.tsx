@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader, RotateCcw, Trash2 } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
+import { useHeaderSyncAction } from "@/components/HeaderSyncContext";
 import { safeSessionStorageSet } from "@/lib/browser-storage";
 import { navigateBackOr } from "@/lib/navigation";
 import type { Photo } from "@/lib/photo-cache";
@@ -16,6 +16,10 @@ export default function TrashPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useHeaderSyncAction({
+    onBack: () => navigateBackOr(router, "/"),
+  });
 
   const loadTrash = useCallback(async () => {
     setLoading(true);
@@ -116,14 +120,8 @@ export default function TrashPage() {
 
   return (
     <div className="page-shell">
-      <PageHeader
-        title="Trash"
-        kicker="Recovery"
-        onBack={() => navigateBackOr(router, "/")}
-        meta={null}
-      />
 
-      <div className="glass action-row" style={{ marginBottom: "1.5rem", padding: "1rem", borderRadius: "16px", border: 'none' }}>
+      <div className="glass action-row" style={{ marginBottom: "1.5rem", padding: "1rem", borderRadius: "16px" }}>
         <button className="btn btn-secondary btn-sm" onClick={restoreAll} disabled={busy || photos.length === 0}>
           <RotateCcw size={14} />
           Restore All

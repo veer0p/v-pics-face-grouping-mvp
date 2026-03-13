@@ -59,7 +59,7 @@ export function InstallPrompt() {
     if (!showBanner || dismissed) return null;
 
     return (
-        <div className="install-banner glass-heavy">
+        <div className="install-banner glass" style={{ border: '1px solid var(--glass-border)' }}>
             <div className="install-banner-content">
                 <div className="install-banner-icon">
                     <Download size={20} strokeWidth={2} />
@@ -68,15 +68,20 @@ export function InstallPrompt() {
                     <p className="install-banner-title">Add V-Pics to Home Screen</p>
                     <p className="install-banner-sub">
                         {isIOS
-                            ? <>Tap <Share size={12} strokeWidth={2.5} style={{ display: "inline", verticalAlign: "-2px" }} /> then &ldquo;Add to Home Screen&rdquo;</>
-                            : "Install for quick access. Offline support is limited to safe cached assets."}
+                            ? <>Tap <Share size={12} strokeWidth={2.5} style={{ display: "inline", verticalAlign: "-2px", margin: '0 2px' }} /> then &ldquo;Add to Home Screen&rdquo; from Safari menu.</>
+                            : deferredPrompt
+                                ? "Install as an app for a better experience."
+                                : "Add this site to your home screen or install it via browser settings."}
                     </p>
                 </div>
                 <div className="install-banner-actions">
-                    {!isIOS && (
+                    {deferredPrompt && (
                         <button className="btn btn-primary btn-sm" onClick={handleInstall}>
                             Install
                         </button>
+                    )}
+                    {!isIOS && !deferredPrompt && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600 }}>Installable via Browser Menu</span>
                     )}
                     <button className="btn btn-ghost btn-sm" onClick={handleDismiss}>
                         <X size={14} />
