@@ -24,12 +24,12 @@ export type Palette = {
 export const ACCENT_PALETTES: { light: Palette[]; dark: Palette[] } = {
     light: [
         {
-            name: "Luxury Cute",
-            accent: "#A64D70", accent2: "#EFD7B1", accentSoft: "rgba(166, 77, 112, 0.13)",
-            ink: "#2E1722", ink2: "#52313F", muted: "#8A6776", muted2: "#DCC8CF",
-            bg: "#FFFBF8", bgElevated: "#FFFDFC", bgSubtle: "#F8F0F1",
-            glow: "transparent",
-            line: "rgba(82, 49, 63, 0.08)", lineStrong: "rgba(82, 49, 63, 0.16)",
+            name: "Barbie Light",
+            accent: "#FF007F", accent2: "#FF66CC", accentSoft: "rgba(255, 0, 127, 0.08)",
+            ink: "#300018", ink2: "#4D0026", muted: "#8B4D6D", muted2: "#B386A1",
+            bg: "#FFF5F9", bgElevated: "#FFF0F6", bgSubtle: "#FFEBF4",
+            glow: "rgba(255, 0, 127, 0.3)",
+            line: "rgba(255, 0, 127, 0.12)", lineStrong: "rgba(255, 0, 127, 0.22)",
         },
         {
             name: "Lavender",

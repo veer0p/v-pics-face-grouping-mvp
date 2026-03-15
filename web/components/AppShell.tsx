@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <HeaderSyncProvider value={setHeaderSyncAction}>
             <div
                 className={`app-shell${hideHeader ? " no-header" : ""}`}
-                data-theme="neon-barbie"
+                data-theme={resolved === "dark" ? "neon-barbie" : "light"}
             >
                 {!hideHeader && resolved === "light" && <PookieBackground accentIndex={accentIndex} />}
                 {showSidebar && <Sidebar />}
